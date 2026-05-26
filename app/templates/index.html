@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dispatch Engine — Démo Prospect</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root {
+      --green-deep: #1B4332;
+      --green-mid:  #2D6A4F;
+      --green-soft: #52B788;
+      --green-pale: #D8F3DC;
+    }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #F4F7F5; }
+    #map { height: 100%; min-height: 480px; border-radius: 12px; }
+    .tab-btn { transition: all .2s; }
+    .tab-btn.active { background: var(--green-deep); color: white; }
+    .tab-btn:not(.active) { color: #374151; }
+    .tab-btn:not(.active):hover { background: #E5E7EB; }
+    .card { background: white; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .upload-zone { border: 2px dashed #D1D5DB; border-radius: 10px; transition: all .2s; cursor: pointer; }
+    .upload-zone:hover, .upload-zone.drag-over { border-color: var(--green-soft); background: var(--green-pale); }
+    .badge-assigned   { background: #DCFCE7; color: #166534; }
+    .badge-unassigned { background: #FEE2E2; color: #991B1B; }
+    .badge-vehicle { background: #EEF2FF; color: #3730A3; }
+    #toast { transition: opacity .3s; }
+    .step-active   { background: var(--green-deep); color: white; }
+    .step-done     { background: var(--green-soft); color: white; }
+    .step-inactive { background: #E5E7EB; color: #6B7280; }
+    .pulse { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+    .result-row-enter { animation: slideIn .3s ease; }
+    @keyframes slideIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+    input:focus, select:focus { outline: 2px solid var(--green-soft); outline-offset: 1px; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
+<header style="background: var(--green-deep);" class="text-white px-6 py-4 flex items-center justify-between shadow-lg">
+  <div class="flex items-center gap-3">
+    <span class="text-3xl">🌿</span>
+    <div>
+      <h1 class="text-xl font-bold tracking-tight">Dispatch Engine</h1>
+      <p class="text-sm opacity-70">Moteur d'attribution intelligente pour coursiers écologiques</p>
+    </div>
+  </div>
+  <button onclick="confirmReset()"
+    class="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+    🔄 Réinitialiser la démo
+  </button>
+</header>
+
+<!-- ═══════════════════════════ TOAST ═══════════════════════════ -->
+<div id="toast" class="fixed top-5 right-5 z-50 opacity-0 pointer-events-none">
+  <div id="toast-inner" class="px-5 py-3 rounded-xl shadow-xl text-white text-sm font-medium max-w-xs"></div>
+</div>
+
+<!-- ═══════════════════════════ MAIN ═══════════════════════════ -->
+<main class="max-w-screen-2xl mx-auto px-4 py-6 flex gap-6">
+
+  <!-- ──────── COLONNE GAUCHE ──────── -->
+  <div class="flex-1 min-w-0 flex flex-col gap-5">
+
+    <!-- Steps indicateur -->
+    <div class="flex items-center gap-2">
+      <button onclick="switchTab('fleet')"   id="step-fleet"   class="step-btn flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition">
+        <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold step-num" id="sn-fleet">1</span>
+        Configurer la flotte
+      </button>
+      <div class="flex-1 h-px bg-gray-300"></div>
+      <button onclick="switchTab('orders')"  id="step-orders"  class="step-btn flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition">
+        <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold step-num" id="sn-orders">2</span>
+        Simuler des courses
+      </button>
+      <div class="flex-1 h-px bg-gray-300"></div>
+      <button onclick="switchTab('results')" id="step-results" class="step-btn flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition">
+        <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold step-num" id="sn-results">3</span>
+        Résultats
+      </button>
+    </div>
+
+    <!-- ══════════ TAB : FLOTTE ══════════ -->
+    <div id="tab-fleet">
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <!-- Saisie manuelle coursier -->
+        <div class="card p-5">
+          <h2 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            ✏️ Ajouter un coursier manuellement
+          </h2>
+          <form id="courier-form" onsubmit="submitCourierForm(event)" class="flex flex-col gap-3">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs font-medium text-gray-600 mb-1 block">Code (3 lettres)</label>
+                <input id="c-code" maxlength="3" required placeholder="KEN"
+                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm uppercase font-mono"/>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-gray-600 mb-1 block">Type de véhicule</label>
+                <select id="c-type" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                  <option value="scoot_ville">🛵 Scoot Paris</option>
+                  <option value="scoot_banlieue_proche">🛵 Scoot Petite Couronne</option>
+                  <option value="scoot_banlieue_loin">🛵 Scoot Grande Couronne</option>
+                  <option value="fourgon">🚐 Fourgon</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs font-medium text-gray-600 mb-1 block">Latitude</label>
+                <input id="c-lat" type="number" step="any" value="48.8566" required
+                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono"/>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-gray-600 mb-1 block">Longitude</label>
+                <input id="c-lon" type="number" step="any" value="2.3522" required
+                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono"/>
+              </div>
+            </div>
+            <button type="button" onclick="setMapMode('courier')"
+              class="text-xs text-blue-600 hover:text-blue-800 text-left flex items-center gap-1 font-medium">
+              📍 Ou cliquer directement sur la carte →
+            </button>
+            <button type="submit"
+              style="background: var(--green-mid);"
+              class="text-white font-semibold py-2 rounded-lg hover:opacity-90 transition text-sm">
+              + Ajouter le coursier
+            </button>
+          </form>
+        </div>
+
+        <!-- Import fichier flotte -->
+        <div class="card p-5 flex flex-col gap-4">
+          <h2 class="font-semibold text-gray-800 flex items-center gap-2">
+            📂 Importer une flotte (CSV ou Excel)
+          </h2>
+          <div id="fleet-upload-zone" class="upload-zone p-6 text-center flex flex-col items-center gap-2"
+            onclick="document.getElementById('fleet-file').click()"
+            ondragover="handleDragOver(event,'fleet-upload-zone')"
+            ondragleave="handleDragLeave(event,'fleet-upload-zone')"
+            ondrop="handleDrop(event,'fleet')">
+            <span class="text-3xl">📋</span>
+            <p class="text-sm font-medium text-gray-700">Glisser-déposer ou cliquer pour parcourir</p>
+            <p class="text-xs text-gray-400">.csv · .xlsx · .xls</p>
+          </div>
+          <input id="fleet-file" type="file" accept=".csv,.xlsx,.xls" class="hidden"
+            onchange="uploadFleetFile(this.files[0])"/>
+          <a href="/demo/templates/fleet" download
+            class="flex items-center justify-center gap-2 border border-gray-200 rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition font-medium">
+            ⬇️ Télécharger le modèle CSV
+          </a>
+          <!-- Résultat upload -->
+          <div id="fleet-upload-result" class="hidden text-sm rounded-lg p-3"></div>
+        </div>
+      </div>
+
+      <!-- Table flotte -->
+      <div class="card p-5 mt-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-gray-800">🚀 Flotte actuelle
+            <span id="fleet-count" class="ml-2 text-sm font-normal text-gray-400">(0 coursier)</span>
+          </h2>
+          <button onclick="refreshCouriers()" class="text-xs text-gray-400 hover:text-gray-600">↺ Rafraîchir</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-b">
+                <th class="pb-2 pr-4">Code</th>
+                <th class="pb-2 pr-4">Type</th>
+                <th class="pb-2 pr-4">Position</th>
+                <th class="pb-2 pr-4">Charge</th>
+                <th class="pb-2">Statut</th>
+              </tr>
+            </thead>
+            <tbody id="fleet-tbody">
+              <tr><td colspan="5" class="py-8 text-center text-gray-400 text-sm">
+                Aucun coursier enregistré — ajoutez-en ci-dessus ou importez un fichier.
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /tab-fleet -->
+
+    <!-- ══════════ TAB : COMMANDES ══════════ -->
+    <div id="tab-orders" class="hidden">
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <!-- Saisie manuelle commande -->
+        <div class="card p-5">
+          <h2 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">⚡ Dispatcher une course</h2>
+          <form id="order-form" onsubmit="submitOrderForm(event)" class="flex flex-col gap-3">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs font-medium text-gray-600 mb-1 block">Identifiant</label>
+                <input id="o-id" placeholder="ORD-001" required
+                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono"/>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-gray-600 mb-1 block">Zone</label>
+                <select id="o-zone" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                  <option value="Paris">Paris intra-muros</option>
+                  <option value="Petite_Couronne">Petite Couronne</option>
+                  <option value="Grande_Couronne">Grande Couronne</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-gray-600 mb-1 block">Volume du colis</label>
+              <select id="o-volume" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                <option value="Standard">📦 Standard (1 unité)</option>
+                <option value="Volume">📦📦 Volume (2 unités)</option>
+                <option value="Voiture">🚛 Voiture (5 unités — fourgon requis)</option>
+              </select>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2">
+              <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">📍 Ramassage</p>
+              <div class="grid grid-cols-2 gap-2">
+                <input id="o-plat" type="number" step="any" placeholder="Latitude" required
+                  class="border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono"/>
+                <input id="o-plon" type="number" step="any" placeholder="Longitude" required
+                  class="border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono"/>
+              </div>
+              <button type="button" onclick="setMapMode('pickup')"
+                class="text-xs text-blue-600 hover:text-blue-800 text-left flex items-center gap-1 font-medium">
+                📍 Cliquer sur la carte pour définir le ramassage →
+              </button>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3 flex flex-col gap-2">
+              <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">🏁 Livraison</p>
+              <div class="grid grid-cols-2 gap-2">
+                <input id="o-dlat" type="number" step="any" placeholder="Latitude" required
+                  class="border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono"/>
+                <input id="o-dlon" type="number" step="any" placeholder="Longitude" required
+                  class="border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono"/>
+              </div>
+              <button type="button" onclick="setMapMode('delivery')"
+                class="text-xs text-blue-600 hover:text-blue-800 text-left flex items-center gap-1 font-medium">
+                🏁 Cliquer sur la carte pour définir la livraison →
+              </button>
+            </div>
+            <button type="submit"
+              style="background: var(--green-mid);"
+              class="text-white font-semibold py-2.5 rounded-lg hover:opacity-90 transition text-sm">
+              ⚡ Dispatcher maintenant
+            </button>
+          </form>
+        </div>
+
+        <!-- Import commandes -->
+        <div class="card p-5 flex flex-col gap-4">
+          <h2 class="font-semibold text-gray-800 flex items-center gap-2">
+            📂 Importer des commandes (CSV ou Excel)
+          </h2>
+          <div id="orders-upload-zone" class="upload-zone p-6 text-center flex flex-col items-center gap-2"
+            onclick="document.getElementById('orders-file').click()"
+            ondragover="handleDragOver(event,'orders-upload-zone')"
+            ondragleave="handleDragLeave(event,'orders-upload-zone')"
+            ondrop="handleDrop(event,'orders')">
+            <span class="text-3xl">📋</span>
+            <p class="text-sm font-medium text-gray-700">Glisser-déposer ou cliquer pour parcourir</p>
+            <p class="text-xs text-gray-400">.csv · .xlsx · .xls</p>
+          </div>
+          <input id="orders-file" type="file" accept=".csv,.xlsx,.xls" class="hidden"
+            onchange="uploadOrdersFile(this.files[0])"/>
+          <a href="/demo/templates/orders" download
+            class="flex items-center justify-center gap-2 border border-gray-200 rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition font-medium">
+            ⬇️ Télécharger le modèle CSV
+          </a>
+          <!-- Résultat upload commandes -->
+          <div id="orders-upload-result" class="hidden text-sm rounded-lg p-3"></div>
+        </div>
+
+      </div>
+
+      <!-- Derniers résultats de dispatch -->
+      <div id="quick-results-container" class="card p-5 mt-4 hidden">
+        <h2 class="font-semibold text-gray-800 mb-3">⚡ Derniers dispatchs</h2>
+        <div id="quick-results" class="flex flex-col gap-2"></div>
+      </div>
+
+    </div><!-- /tab-orders -->
+
+    <!-- ══════════ TAB : RÉSULTATS ══════════ -->
+    <div id="tab-results" class="hidden flex flex-col gap-5">
+
+      <!-- Stats cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="card p-4 text-center">
+          <p class="text-3xl font-bold text-gray-800" id="stat-total">0</p>
+          <p class="text-xs text-gray-500 mt-1 font-medium">Courses totales</p>
+        </div>
+        <div class="card p-4 text-center">
+          <p class="text-3xl font-bold text-green-600" id="stat-assigned">0</p>
+          <p class="text-xs text-gray-500 mt-1 font-medium">Assignées</p>
+        </div>
+        <div class="card p-4 text-center">
+          <p class="text-3xl font-bold text-red-500" id="stat-unassigned">0</p>
+          <p class="text-xs text-gray-500 mt-1 font-medium">Non assignées</p>
+        </div>
+        <div class="card p-4 text-center">
+          <p class="text-3xl font-bold" style="color: var(--green-mid)" id="stat-score">—</p>
+          <p class="text-xs text-gray-500 mt-1 font-medium">Score moyen (km)</p>
+        </div>
+      </div>
+
+      <!-- Table résultats -->
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-gray-800">📊 Détail des attributions</h2>
+          <button onclick="exportResults()"
+            class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition text-gray-600 font-medium">
+            ⬇️ Exporter CSV
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-b">
+                <th class="pb-2 pr-3">ID</th>
+                <th class="pb-2 pr-3">Zone</th>
+                <th class="pb-2 pr-3">Volume</th>
+                <th class="pb-2 pr-3">Coursier</th>
+                <th class="pb-2 pr-3">Score</th>
+                <th class="pb-2 pr-3">Statut</th>
+                <th class="pb-2">Détail</th>
+              </tr>
+            </thead>
+            <tbody id="results-tbody">
+              <tr><td colspan="7" class="py-8 text-center text-gray-400 text-sm">
+                Aucune course dispatchée — allez dans l'onglet «&nbsp;Simuler des courses&nbsp;».
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /tab-results -->
+
+  </div><!-- /left col -->
+
+  <!-- ──────── CARTE (droite, sticky) ──────── -->
+  <div class="hidden lg:flex flex-col gap-3" style="width:420px;flex-shrink:0;">
+    <div class="card p-3 flex-1" style="position:sticky;top:1rem;">
+      <div id="map-hint" class="hidden mb-2 text-xs font-semibold text-blue-700 bg-blue-50 rounded-lg px-3 py-2 pulse">
+        🖱️ Cliquez sur la carte pour définir la position
+      </div>
+      <div id="map"></div>
+      <!-- Légende -->
+      <div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+        <span class="flex items-center gap-1">🟢 Coursier libre</span>
+        <span class="flex items-center gap-1">🟡 Coursier chargé</span>
+        <span class="flex items-center gap-1">📍 Ramassage</span>
+        <span class="flex items-center gap-1">🏁 Livraison</span>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══════════════════════════ SCRIPTS ═══════════════════════════ -->
+<script>
+// ─────────────────────────────────────────────
+// État global
+// ─────────────────────────────────────────────
+let map, courierLayers = {}, dispatchLines = [], pickupMarkers = [], deliveryMarkers = [];
+let mapClickMode = null; // 'courier' | 'pickup' | 'delivery'
+let allResults = [];     // tous les résultats de dispatch accumulés
+
+// ─────────────────────────────────────────────
+// Initialisation
+// ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initMap();
+  switchTab('fleet');
+  refreshCouriers();
+  refreshResults();
+  autoIncrementOrderId();
+});
+
+function autoIncrementOrderId() {
+  const el = document.getElementById('o-id');
+  el.value = 'ORD-' + String(Math.floor(Math.random() * 900) + 100);
+}
+
+// ─────────────────────────────────────────────
+// Carte Leaflet
+// ─────────────────────────────────────────────
+function initMap() {
+  map = L.map('map').setView([48.8566, 2.3522], 11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+    maxZoom: 18,
+  }).addTo(map);
+
+  map.on('click', (e) => {
+    if (!mapClickMode) return;
+    const { lat, lng } = e.latlng;
+    if (mapClickMode === 'courier') {
+      document.getElementById('c-lat').value = lat.toFixed(5);
+      document.getElementById('c-lon').value = lng.toFixed(5);
+      showToast('Position du coursier définie sur la carte', 'success');
+    } else if (mapClickMode === 'pickup') {
+      document.getElementById('o-plat').value = lat.toFixed(5);
+      document.getElementById('o-plon').value = lng.toFixed(5);
+      showToast('Point de ramassage défini', 'success');
+    } else if (mapClickMode === 'delivery') {
+      document.getElementById('o-dlat').value = lat.toFixed(5);
+      document.getElementById('o-dlon').value = lng.toFixed(5);
+      showToast('Point de livraison défini', 'success');
+    }
+    resetMapMode();
+  });
+}
+
+function setMapMode(mode) {
+  mapClickMode = mode;
+  document.getElementById('map-hint').classList.remove('hidden');
+  map.getContainer().style.cursor = 'crosshair';
+}
+
+function resetMapMode() {
+  mapClickMode = null;
+  document.getElementById('map-hint').classList.add('hidden');
+  map.getContainer().style.cursor = '';
+}
+
+function courierColor(code) {
+  const palette = ['#e63946','#2a9d8f','#e9c46a','#f4a261','#264653','#7209b7','#3a86ff','#06d6a0'];
+  let h = 0;
+  for (const c of code) h = (h * 31 + c.charCodeAt(0)) % palette.length;
+  return palette[h];
+}
+
+function updateMapCouriers(couriers) {
+  // Supprimer anciens marqueurs
+  Object.values(courierLayers).forEach(l => map.removeLayer(l));
+  courierLayers = {};
+
+  couriers.forEach(c => {
+    const color = courierColor(c.code);
+    const loadPct = c.max_load > 0 ? c.current_load / c.max_load : 0;
+    const fillColor = loadPct >= 1 ? '#ef4444' : loadPct > 0.5 ? '#f59e0b' : '#22c55e';
+
+    const marker = L.circleMarker([c.lat, c.lon], {
+      radius: 10, color, fillColor, weight: 2, fillOpacity: 0.85,
+    }).addTo(map);
+
+    marker.bindPopup(`
+      <b>${c.code}</b><br/>
+      ${c.vehicle_type.replace(/_/g,' ')}<br/>
+      Charge: ${c.current_load}/${c.max_load}<br/>
+      ${c.order_count} course(s) en cours
+    `);
+
+    const icon = L.divIcon({
+      html: `<span style="color:white;font-size:9px;font-weight:bold;line-height:20px">${c.code}</span>`,
+      className: '', iconSize: [20, 20], iconAnchor: [10, 10],
+    });
+    L.marker([c.lat, c.lon], { icon, interactive: false, zIndexOffset: 10 }).addTo(map);
+
+    courierLayers[c.code] = marker;
+  });
+}
+
+function drawDispatchLine(result, courierLat, courierLon) {
+  if (!result.success) return;
+  const color = courierColor(result.assigned_to);
+  const pts = [
+    [courierLat, courierLon],
+    [result.pickup_lat, result.pickup_lon],
+    [result.delivery_lat, result.delivery_lon],
+  ];
+  const line = L.polyline(pts, { color, weight: 2, opacity: 0.6, dashArray: '5,5' }).addTo(map);
+  dispatchLines.push(line);
+
+  const pMarker = L.circleMarker([result.pickup_lat, result.pickup_lon],
+    { radius:6, color:'#3b82f6', fillColor:'#93c5fd', fillOpacity:1, weight:2 }).addTo(map);
+  pMarker.bindPopup(`📍 Ramassage — ${result.order_id}`);
+  pickupMarkers.push(pMarker);
+
+  const dMarker = L.circleMarker([result.delivery_lat, result.delivery_lon],
+    { radius:6, color:'#6b7280', fillColor:'#d1d5db', fillOpacity:1, weight:2 }).addTo(map);
+  dMarker.bindPopup(`🏁 Livraison — ${result.order_id}`);
+  deliveryMarkers.push(dMarker);
+}
+
+function clearDispatchLines() {
+  [...dispatchLines, ...pickupMarkers, ...deliveryMarkers].forEach(l => map.removeLayer(l));
+  dispatchLines = []; pickupMarkers = []; deliveryMarkers = [];
+}
+
+// ─────────────────────────────────────────────
+// Tabs
+// ─────────────────────────────────────────────
+function switchTab(name) {
+  ['fleet','orders','results'].forEach(t => {
+    document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== name);
+    const stepEl = document.getElementById(`step-${t}`);
+    if (t === name) {
+      stepEl.style.background = 'var(--green-deep)';
+      stepEl.style.color = 'white';
+    } else {
+      stepEl.style.background = '#E5E7EB';
+      stepEl.style.color = '#374151';
+    }
+  });
+  if (name === 'results') refreshResults();
+  if (name === 'orders') autoIncrementOrderId();
+}
+
+// ─────────────────────────────────────────────
+// Coursiers
+// ─────────────────────────────────────────────
+async function submitCourierForm(e) {
+  e.preventDefault();
+  const code = document.getElementById('c-code').value.trim().toUpperCase();
+  const payload = {
+    code,
+    vehicle_type: document.getElementById('c-type').value,
+    lat: parseFloat(document.getElementById('c-lat').value),
+    lon: parseFloat(document.getElementById('c-lon').value),
+  };
+  const res = await fetch('/couriers', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload),
+  });
+  if (res.ok) {
+    showToast(`✓ Coursier ${code} ajouté`, 'success');
+    document.getElementById('c-code').value = '';
+    refreshCouriers();
+  } else {
+    const err = await res.json();
+    showToast(`Erreur: ${err.detail}`, 'error');
+  }
+}
+
+async function refreshCouriers() {
+  const res = await fetch('/couriers');
+  const couriers = await res.json();
+  renderFleetTable(couriers);
+  updateMapCouriers(couriers);
+  document.getElementById('fleet-count').textContent = `(${couriers.length} coursier${couriers.length>1?'s':''})`;
+}
+
+function renderFleetTable(couriers) {
+  const tbody = document.getElementById('fleet-tbody');
+  if (!couriers.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-gray-400 text-sm">
+      Aucun coursier enregistré — ajoutez-en ci-dessus ou importez un fichier.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = couriers.map(c => {
+    const loadPct = Math.round(c.current_load / c.max_load * 100);
+    const barColor = loadPct >= 100 ? 'bg-red-400' : loadPct > 60 ? 'bg-yellow-400' : 'bg-green-400';
+    const vehicleLabel = {
+      scoot_ville:'🛵 Paris',
+      scoot_banlieue_proche:'🛵 PC',
+      scoot_banlieue_loin:'🛵 GC',
+      fourgon:'🚐 Fourgon',
+    }[c.vehicle_type] || c.vehicle_type;
+    return `
+    <tr class="border-b border-gray-50 hover:bg-gray-50 transition">
+      <td class="py-2.5 pr-4 font-mono font-bold" style="color:${courierColor(c.code)}">${c.code}</td>
+      <td class="py-2.5 pr-4"><span class="badge-vehicle px-2 py-0.5 rounded-full text-xs font-medium">${vehicleLabel}</span></td>
+      <td class="py-2.5 pr-4 text-gray-500 text-xs font-mono">${c.lat.toFixed(4)}, ${c.lon.toFixed(4)}</td>
+      <td class="py-2.5 pr-4">
+        <div class="flex items-center gap-2">
+          <div class="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div class="h-full ${barColor} rounded-full" style="width:${loadPct}%"></div>
+          </div>
+          <span class="text-xs text-gray-500">${c.current_load}/${c.max_load}</span>
+        </div>
+      </td>
+      <td class="py-2.5">
+        <span class="text-xs ${c.is_active ? 'text-green-600' : 'text-gray-400'}">
+          ${c.is_active ? '● Actif' : '○ Inactif'}
+        </span>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────
+// Commandes
+// ─────────────────────────────────────────────
+async function submitOrderForm(e) {
+  e.preventDefault();
+  const payload = {
+    id: document.getElementById('o-id').value.trim(),
+    pickup_lat:   parseFloat(document.getElementById('o-plat').value),
+    pickup_lon:   parseFloat(document.getElementById('o-plon').value),
+    delivery_lat: parseFloat(document.getElementById('o-dlat').value),
+    delivery_lon: parseFloat(document.getElementById('o-dlon').value),
+    zone:         document.getElementById('o-zone').value,
+    volume_type:  document.getElementById('o-volume').value,
+  };
+  const res = await fetch('/orders', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload),
+  });
+  if (res.status === 409) {
+    showToast('Cet ID existe déjà — changez-le', 'error'); return;
+  }
+  const data = await res.json();
+  appendQuickResult(data);
+  storeResult(data);
+  refreshCouriers();
+  refreshResults();
+  if (data.success) {
+    showToast(`✓ ${data.order_id} → ${data.assigned_to} (score: ${data.score})`, 'success');
+    // Dessine la ligne sur la carte
+    const courier = (await (await fetch(`/couriers/${data.assigned_to}`)).json());
+    drawDispatchLine({
+      ...data,
+      pickup_lat: payload.pickup_lat, pickup_lon: payload.pickup_lon,
+      delivery_lat: payload.delivery_lat, delivery_lon: payload.delivery_lon,
+    }, courier.lat, courier.lon);
+  } else {
+    showToast(`⚠ ${data.order_id} — aucun coursier dispo`, 'warning');
+  }
+  autoIncrementOrderId();
+}
+
+function appendQuickResult(data) {
+  const container = document.getElementById('quick-results-container');
+  const list = document.getElementById('quick-results');
+  container.classList.remove('hidden');
+  const div = document.createElement('div');
+  div.className = `result-row-enter flex items-center justify-between rounded-lg px-4 py-2.5 ${
+    data.success ? 'bg-green-50 border border-green-100' : 'bg-red-50 border border-red-100'}`;
+  div.innerHTML = `
+    <span class="font-mono font-semibold text-sm ${data.success?'text-green-800':'text-red-700'}">${data.order_id}</span>
+    <span class="text-xs text-gray-500 mx-2">${data.order?.zone || ''} · ${data.order?.volume_type || ''}</span>
+    <span class="text-sm font-medium ${data.success?'text-green-700':'text-red-600'}">
+      ${data.success ? `✅ → <b>${data.assigned_to}</b> (${data.score} km)` : '❌ Non assignée'}
+    </span>`;
+  list.prepend(div);
+}
+
+function storeResult(data) {
+  allResults.unshift(data);
+}
+
+// ─────────────────────────────────────────────
+// Résultats
+// ─────────────────────────────────────────────
+async function refreshResults() {
+  const res = await fetch('/orders');
+  const orders = await res.json();
+  const assigned   = orders.filter(o => o.status === 'assigned' || o.status === 'in_transit');
+  const unassigned = orders.filter(o => o.status === 'unassignable');
+  const scores = allResults.filter(r => r.success && r.score != null).map(r => r.score);
+  const avgScore = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(2) : '—';
+
+  document.getElementById('stat-total').textContent = orders.length;
+  document.getElementById('stat-assigned').textContent = assigned.length;
+  document.getElementById('stat-unassigned').textContent = unassigned.length;
+  document.getElementById('stat-score').textContent = avgScore;
+
+  const tbody = document.getElementById('results-tbody');
+  if (!orders.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-gray-400 text-sm">
+      Aucune course dispatchée — allez dans l'onglet «&nbsp;Simuler des courses&nbsp;».</td></tr>`;
+    return;
+  }
+  const ordersMap = {};
+  allResults.forEach(r => { ordersMap[r.order_id] = r; });
+
+  tbody.innerHTML = [...orders].reverse().map(o => {
+    const rData = ordersMap[o.id] || {};
+    const isOk = o.status !== 'unassignable';
+    return `
+    <tr class="border-b border-gray-50 hover:bg-gray-50 result-row-enter">
+      <td class="py-2.5 pr-3 font-mono text-xs font-semibold text-gray-700">${o.id}</td>
+      <td class="py-2.5 pr-3 text-xs text-gray-500">${o.zone.replace('_',' ')}</td>
+      <td class="py-2.5 pr-3"><span class="badge-vehicle px-2 py-0.5 rounded-full text-xs">${o.volume_type}</span></td>
+      <td class="py-2.5 pr-3 font-mono font-bold text-sm" style="color:${isOk ? courierColor(o.assigned_courier||'') : '#9CA3AF'}">
+        ${o.assigned_courier || '—'}
+      </td>
+      <td class="py-2.5 pr-3 text-xs text-gray-600">${rData.score != null ? rData.score + ' km' : '—'}</td>
+      <td class="py-2.5 pr-3">
+        <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${isOk ? 'badge-assigned' : 'badge-unassigned'}">
+          ${isOk ? '✅ Assignée' : '❌ Non assignée'}
+        </span>
+      </td>
+      <td class="py-2.5 text-xs text-gray-400 max-w-xs truncate" title="${rData.reason||''}">${rData.reason||'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────
+// Upload fichiers
+// ─────────────────────────────────────────────
+async function uploadFleetFile(file) {
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  showToast('Import en cours...', 'info');
+  const res = await fetch('/demo/fleet/upload', { method:'POST', body:formData });
+  const data = await res.json();
+  const el = document.getElementById('fleet-upload-result');
+  el.classList.remove('hidden');
+  el.className = `text-sm rounded-lg p-3 ${data.added > 0 ? 'bg-green-50 text-green-800' : 'bg-yellow-50 text-yellow-800'}`;
+  el.innerHTML = `✓ <b>${data.added}</b> coursier(s) ajouté(s)
+    ${data.skipped ? ` · ${data.skipped} ignoré(s) (doublons)` : ''}
+    ${data.errors  ? ` · <span class="text-red-600">${data.errors} erreur(s)</span>` : ''}`;
+  refreshCouriers();
+  showToast(`${data.added} coursier(s) importé(s)`, data.added > 0 ? 'success' : 'warning');
+  document.getElementById('fleet-file').value = '';
+}
+
+async function uploadOrdersFile(file) {
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  showToast('Dispatch en cours...', 'info');
+  const res = await fetch('/demo/orders/upload', { method:'POST', body:formData });
+  const data = await res.json();
+
+  const el = document.getElementById('orders-upload-result');
+  el.classList.remove('hidden');
+  el.className = `text-sm rounded-lg p-3 ${data.assigned === data.total ? 'bg-green-50 text-green-800' : 'bg-yellow-50 text-yellow-800'}`;
+  const pct = data.total > 0 ? Math.round(data.assigned / data.total * 100) : 0;
+  el.innerHTML = `⚡ <b>${data.assigned}/${data.total}</b> courses assignées (${pct}%)
+    ${data.unassignable ? ` · <span class="text-red-600">${data.unassignable} non assignée(s)</span>` : ''}`;
+
+  // Stocke tous les résultats
+  data.results.forEach(r => {
+    storeResult(r);
+    appendQuickResult({ success: r.success, order_id: r.order_id, assigned_to: r.assigned_to, score: r.score,
+      order: { zone: r.zone, volume_type: r.volume_type } });
+  });
+
+  refreshCouriers();
+  refreshResults();
+  showToast(`${data.assigned}/${data.total} courses dispatchées`, 'success');
+  document.getElementById('orders-file').value = '';
+}
+
+// ─────────────────────────────────────────────
+// Drag & Drop
+// ─────────────────────────────────────────────
+function handleDragOver(e, zoneId) {
+  e.preventDefault();
+  document.getElementById(zoneId).classList.add('drag-over');
+}
+function handleDragLeave(e, zoneId) {
+  document.getElementById(zoneId).classList.remove('drag-over');
+}
+function handleDrop(e, type) {
+  e.preventDefault();
+  const zoneId = type === 'fleet' ? 'fleet-upload-zone' : 'orders-upload-zone';
+  document.getElementById(zoneId).classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (type === 'fleet') uploadFleetFile(file);
+  else uploadOrdersFile(file);
+}
+
+// ─────────────────────────────────────────────
+// Reset
+// ─────────────────────────────────────────────
+function confirmReset() {
+  if (!confirm('Réinitialiser toute la démo ? La flotte et les commandes seront effacées.')) return;
+  resetAll();
+}
+
+async function resetAll() {
+  await fetch('/demo/reset', { method:'POST' });
+  allResults = [];
+  clearDispatchLines();
+  refreshCouriers();
+  refreshResults();
+  document.getElementById('quick-results').innerHTML = '';
+  document.getElementById('quick-results-container').classList.add('hidden');
+  document.getElementById('fleet-upload-result').classList.add('hidden');
+  document.getElementById('orders-upload-result').classList.add('hidden');
+  showToast('Démo réinitialisée', 'info');
+}
+
+// ─────────────────────────────────────────────
+// Export CSV résultats
+// ─────────────────────────────────────────────
+function exportResults() {
+  if (!allResults.length) { showToast('Aucun résultat à exporter', 'warning'); return; }
+  const header = 'order_id,zone,volume_type,assigned_to,score,success,reason';
+  const rows = allResults.map(r =>
+    `"${r.order_id}","${r.order?.zone||''}","${r.order?.volume_type||''}","${r.assigned_to||''}","${r.score||''}","${r.success}","${(r.reason||'').replace(/"/g,"'")}"`
+  );
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob([csv], { type:'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'resultats_dispatch.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─────────────────────────────────────────────
+// Toast
+// ─────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, type='success') {
+  const toast = document.getElementById('toast');
+  const inner = document.getElementById('toast-inner');
+  const colors = { success:'#166534,#DCFCE7', error:'#991B1B,#FEE2E2', warning:'#92400E,#FEF3C7', info:'#1e40af,#EFF6FF' };
+  const [textColor, bgColor] = (colors[type] || colors.info).split(',');
+  inner.style.cssText = `color:${textColor};background:${bgColor};border:1px solid ${textColor}30`;
+  inner.textContent = msg;
+  toast.style.opacity = '1';
+  toast.style.pointerEvents = 'auto';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.pointerEvents = 'none';
+  }, 3500);
+}
+</script>
+
+</body>
+</html>

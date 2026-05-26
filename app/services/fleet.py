@@ -153,6 +153,11 @@ class FleetManager:
     # Statistiques
     # ------------------------------------------------------------------
 
+    def reset(self) -> None:
+        """Vide complètement le store — coursiers ET commandes. Utile pour la démo."""
+        self._couriers.clear()
+        self._orders.clear()
+
     @property
     def courier_count(self) -> int:
         return len(self._couriers)
