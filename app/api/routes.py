@@ -76,6 +76,8 @@ def _order_to_response(order: Order) -> OrderResponse:
         delivery_lon=order.delivery.lon,
         zone=order.zone,
         volume_type=order.volume_type,
+        client_tier=order.client_tier,
+        deadline_minutes=order.deadline_minutes,
         status=order.status,
         assigned_courier=order.assigned_courier,
         created_at=order.created_at,
@@ -127,6 +129,8 @@ def create_order(payload: CreateOrderRequest) -> DispatchResponse:
         delivery=Coordinates(lat=payload.delivery_lat, lon=payload.delivery_lon),
         zone=payload.zone,
         volume_type=payload.volume_type,
+        client_tier=payload.client_tier,
+        deadline_minutes=payload.deadline_minutes,
     )
 
     # Enregistre la commande dans le store

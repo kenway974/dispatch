@@ -10,33 +10,41 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import VehicleType, Zone, VolumeType, OrderStatus
+from app.models.enums import VehicleType, Zone, VolumeType, OrderStatus, ClientTier
 
 
 # ---------------------------------------------------------------------------
-# Schémas de requête (ce que le client envoie)
+# Schémas de requête
 # ---------------------------------------------------------------------------
 
 class CreateOrderRequest(BaseModel):
     """Corps de la requête POST /orders."""
-    id: str = Field(..., description="Identifiant unique de la commande (ex: ORD-042)")
-    pickup_lat: float = Field(..., ge=-90, le=90, description="Latitude du ramassage")
-    pickup_lon: float = Field(..., ge=-180, le=180, description="Longitude du ramassage")
-    delivery_lat: float = Field(..., ge=-90, le=90, description="Latitude de la livraison")
+    id: str            = Field(..., description="Identifiant unique (ex: ORD-042)")
+    pickup_lat: float  = Field(..., ge=-90,  le=90,  description="Latitude du ramassage")
+    pickup_lon: float  = Field(..., ge=-180, le=180, description="Longitude du ramassage")
+    delivery_lat: float = Field(..., ge=-90,  le=90,  description="Latitude de la livraison")
     delivery_lon: float = Field(..., ge=-180, le=180, description="Longitude de la livraison")
-    zone: Zone = Field(..., description="Zone géographique de livraison")
-    volume_type: VolumeType = Field(..., description="Type de volume du colis")
+    zone: Zone          = Field(..., description="Zone géographique")
+    volume_type: VolumeType = Field(..., description="Catégorie de volume")
+    client_tier: ClientTier = Field(
+        default=ClientTier.STANDARD,
+        description="Niveau client : standard ou premium",
+    )
+    deadline_minutes: Optional[int] = Field(
+        default=None, ge=1,
+        description="Délai de livraison souhaité en minutes (None = pas de contrainte)",
+    )
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "id": "ORD-001",
-                "pickup_lat": 48.8559,
-                "pickup_lon": 2.3578,
-                "delivery_lat": 48.8864,
-                "delivery_lon": 2.3432,
+                "pickup_lat": 48.8559, "pickup_lon": 2.3578,
+                "delivery_lat": 48.8864, "delivery_lon": 2.3432,
                 "zone": "Paris",
                 "volume_type": "Standard",
+                "client_tier": "standard",
+                "deadline_minutes": 45,
             }
         }
     }
@@ -46,33 +54,22 @@ class CreateCourierRequest(BaseModel):
     """Corps de la requête POST /couriers."""
     code: str = Field(..., min_length=3, max_length=3, description="Code 3 lettres (ex: KEN)")
     vehicle_type: VehicleType
-    lat: float = Field(..., ge=-90, le=90, description="Latitude initiale")
-    lon: float = Field(..., ge=-180, le=180, description="Longitude initiale")
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "code": "KEN",
-                "vehicle_type": "scoot_ville",
-                "lat": 48.8566,
-                "lon": 2.3522,
-            }
-        }
-    }
+    lat: float = Field(..., ge=-90,  le=90)
+    lon: float = Field(..., ge=-180, le=180)
 
 
 class UpdatePositionRequest(BaseModel):
     """Corps de la requête PUT /couriers/{code}/position."""
-    lat: float = Field(..., ge=-90, le=90)
+    lat: float = Field(..., ge=-90,  le=90)
     lon: float = Field(..., ge=-180, le=180)
 
 
 # ---------------------------------------------------------------------------
-# Schémas de réponse (ce que l'API retourne)
+# Schémas de réponse
 # ---------------------------------------------------------------------------
 
 class AssignedOrderSchema(BaseModel):
-    """Représentation simplifiée d'une course dans le portefeuille d'un coursier."""
+    """Course dans le portefeuille d'un coursier (snapshot léger)."""
     order_id: str
     pickup_lat: float
     pickup_lon: float
@@ -83,7 +80,7 @@ class AssignedOrderSchema(BaseModel):
 
 
 class CourierResponse(BaseModel):
-    """Réponse complète pour un coursier."""
+    """État complet d'un coursier."""
     code: str
     vehicle_type: VehicleType
     lat: float
@@ -97,7 +94,7 @@ class CourierResponse(BaseModel):
 
 
 class OrderResponse(BaseModel):
-    """Réponse complète pour une commande."""
+    """État complet d'une commande."""
     id: str
     pickup_lat: float
     pickup_lon: float
@@ -105,13 +102,15 @@ class OrderResponse(BaseModel):
     delivery_lon: float
     zone: Zone
     volume_type: VolumeType
+    client_tier: ClientTier
+    deadline_minutes: Optional[int]
     status: OrderStatus
     assigned_courier: Optional[str]
     created_at: datetime
 
 
 class DispatchResponse(BaseModel):
-    """Résultat retourné après la tentative d'attribution d'une commande."""
+    """Résultat d'une tentative d'attribution."""
     success: bool
     order_id: str
     assigned_to: Optional[str]
