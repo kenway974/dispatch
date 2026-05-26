@@ -52,7 +52,7 @@ class CreateOrderRequest(BaseModel):
 
 class CreateCoursierRequest(BaseModel):
     """Corps de la requête POST /coursiers."""
-    code: str = Field(..., min_length=3, max_length=3, description="Code 3 lettres (ex: KEN)")
+    code: str = Field(..., min_length=2, max_length=4, description="Code 2-4 lettres (ex: KEN, JC)")
     vehicle_type: VehicleType
     lat: float = Field(..., ge=-90,  le=90)
     lon: float = Field(..., ge=-180, le=180)

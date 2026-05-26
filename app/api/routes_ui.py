@@ -104,7 +104,7 @@ FLEET_TEMPLATE_CSV = (
     "JEA,longue_distance,\"Aéroport d'Orly, Paray-Vieille-Poste\"\n"
     "SET,longue_distance,\"Aéroport Charles de Gaulle, Roissy\"\n"
     "LAH,fourgon,\"Place d'Armes, Versailles\"\n"
-    "CAR,fourgon,\"Place Robespierre, Vitry-sur-Seine\"\n"
+    "CAR,fourgon,\"Mairie de Vitry-sur-Seine\"\n"
 )
 
 # Modèle commandes : adresses + client_tier + deadline_minutes

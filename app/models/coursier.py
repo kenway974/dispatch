@@ -51,7 +51,7 @@ class Coursier(BaseModel):
     Représente un coursier de la flotte avec son état temps réel.
 
     Attributs clés :
-    - code           : identifiant unique 3 lettres (ex: KEN)
+    - code           : identifiant unique 2-4 lettres (ex: KEN, JC)
     - vehicle_type   : détermine les zones et volumes éligibles
     - position       : position GPS actualisée en temps réel
     - assigned_orders: liste des courses actuellement assignées
@@ -59,7 +59,7 @@ class Coursier(BaseModel):
     """
     model_config = {"frozen": False}
 
-    code: str = Field(..., min_length=3, max_length=3, description="Code unique 3 lettres (ex: KEN)")
+    code: str = Field(..., min_length=2, max_length=4, description="Code unique 2-4 lettres (ex: KEN, JC)")
     vehicle_type: VehicleType
     position: GpsPosition
     assigned_orders: List[AssignedOrder] = Field(default_factory=list)
