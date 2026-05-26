@@ -36,7 +36,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 @router.get("/", include_in_schema=False)
 def index(request: Request):
     """Sert la page HTML de démonstration."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html")
 
 
 # ---------------------------------------------------------------------------
