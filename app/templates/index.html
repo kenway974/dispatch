@@ -92,9 +92,10 @@
               <div>
                 <label class="text-xs font-medium text-gray-600 mb-1 block">Véhicule</label>
                 <select id="c-type" class="addr-input">
-                  <option value="scoot_ville">🛵 Scoot Paris</option>
-                  <option value="scoot_banlieue_proche">🛵 Scoot Petite Couronne</option>
-                  <option value="scoot_banlieue_loin">🛵 Scoot Grande Couronne</option>
+                  <option value="scoot_ville">🛵 Scoot Paris (50cc)</option>
+                  <option value="scoot_banlieue_proche">🛵 Scoot Petite Couronne (50cc)</option>
+                  <option value="scoot_banlieue_loin">🛵 Scoot Grande Couronne (125cc+)</option>
+                  <option value="longue_distance">🚗 Longue Distance</option>
                   <option value="fourgon">🚐 Fourgon</option>
                 </select>
               </div>
@@ -217,13 +218,34 @@
               </div>
             </div>
 
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-xs font-medium text-gray-600 mb-1 block">Volume du colis</label>
+                <select id="o-volume" class="addr-input">
+                  <option value="Standard">📦 Standard</option>
+                  <option value="Volume">📦📦 Volume</option>
+                  <option value="Voiture">🚛 Voiture (fourgon)</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-gray-600 mb-1 block">Client</label>
+                <select id="o-tier" class="addr-input">
+                  <option value="standard">⬜ Standard</option>
+                  <option value="premium">⭐ Premium</option>
+                </select>
+              </div>
+            </div>
+
             <div>
-              <label class="text-xs font-medium text-gray-600 mb-1 block">Volume du colis</label>
-              <select id="o-volume" class="addr-input">
-                <option value="Standard">📦 Standard (scooter)</option>
-                <option value="Volume">📦📦 Volume (scooter, grande capacité)</option>
-                <option value="Voiture">🚛 Voiture (fourgon requis)</option>
-              </select>
+              <label class="text-xs font-medium text-gray-600 mb-1 block">
+                Délai de livraison
+                <span class="text-gray-400 font-normal">(optionnel)</span>
+              </label>
+              <div class="flex items-center gap-2">
+                <input id="o-deadline" type="number" min="1" max="480" placeholder="Ex : 45"
+                  class="addr-input w-32 font-mono"/>
+                <span class="text-xs text-gray-400">minutes • vide = sans contrainte</span>
+              </div>
             </div>
 
             <!-- Ramassage — adresse uniquement -->
@@ -615,7 +637,7 @@ function renderFleetTable(couriers) {
   tbody.innerHTML = couriers.map(c => {
     const pct = Math.round(c.current_load / c.max_load * 100);
     const barColor = pct >= 100 ? 'bg-red-400' : pct > 60 ? 'bg-yellow-400' : 'bg-green-400';
-    const vLabel = { scoot_ville:'🛵 Paris', scoot_banlieue_proche:'🛵 PC', scoot_banlieue_loin:'🛵 GC', fourgon:'🚐 Fourgon' }[c.vehicle_type] || c.vehicle_type;
+    const vLabel = { scoot_ville:'🛵 Paris', scoot_banlieue_proche:'🛵 PC', scoot_banlieue_loin:'🛵 GC', longue_distance:'🚗 LD', fourgon:'🚐 Fourgon' }[c.vehicle_type] || c.vehicle_type;
     return `<tr class="border-b border-gray-50 hover:bg-gray-50">
       <td class="py-2.5 pr-4 font-mono font-bold" style="color:${courierColor(c.code)}">${c.code}</td>
       <td class="py-2.5 pr-4"><span class="badge-vehicle px-2 py-0.5 rounded-full text-xs font-medium">${vLabel}</span></td>
@@ -660,12 +682,15 @@ async function submitOrderForm(e) {
 
   setBtnLoading('o-submit-icon','o-submit-label','⏳','Dispatch…', true);
 
+  const deadlineRaw = document.getElementById('o-deadline').value.trim();
   const payload = {
     id: document.getElementById('o-id').value.trim(),
     pickup_lat: pickup.lat, pickup_lon: pickup.lon,
     delivery_lat: delivery.lat, delivery_lon: delivery.lon,
     zone: document.getElementById('o-zone').value,
     volume_type: document.getElementById('o-volume').value,
+    client_tier: document.getElementById('o-tier').value,
+    ...(deadlineRaw ? { deadline_minutes: parseInt(deadlineRaw, 10) } : {}),
   };
 
   const res = await fetch('/orders', {
@@ -692,8 +717,10 @@ async function submitOrderForm(e) {
   }
 
   previewPickup = null; previewDelivery = null;
-  document.getElementById('o-paddr').value = '';
-  document.getElementById('o-daddr').value = '';
+  document.getElementById('o-paddr').value    = '';
+  document.getElementById('o-daddr').value    = '';
+  document.getElementById('o-deadline').value = '';
+  document.getElementById('o-tier').value     = 'standard';
   autoIncrementOrderId();
 }
 

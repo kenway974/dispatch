@@ -11,7 +11,7 @@ import csv
 import io
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 import openpyxl
@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.api.schemas import AssignedOrderSchema, CourierResponse, DispatchResponse, OrderResponse
 from app.models.courier import Courier, GpsPosition
-from app.models.enums import VehicleType, Zone, VolumeType
+from app.models.enums import ClientTier, VehicleType, Zone, VolumeType
 from app.models.order import Coordinates, Order
 from app.services.dispatch import dispatch_order
 from app.services.fleet import fleet_manager
@@ -88,26 +88,32 @@ async def geocode_address(address: str) -> tuple[float, float]:
         return float(data[0]["lat"]), float(data[0]["lon"])
 
 
+# ---------------------------------------------------------------------------
 # Templates CSV
+# ---------------------------------------------------------------------------
 FLEET_TEMPLATE_CSV = (
     "code,vehicle_type,adresse\n"
-    "KEN,scoot_ville,\"Île de la Cité, Paris\"\n"
-    "THO,scoot_ville,\"18 Place du Tertre, Montmartre, Paris\"\n"
-    "ALI,scoot_ville,\"Place de la Bastille, Paris\"\n"
-    "MAR,scoot_banlieue_proche,\"Place du 8 mai 1945, Saint-Denis\"\n"
-    "LEA,scoot_banlieue_proche,\"Place de la République, Aubervilliers\"\n"
-    "SAM,scoot_banlieue_loin,\"Place des Fêtes, Sarcelles\"\n"
-    "FOU,fourgon,\"Place d'Armes, Versailles\"\n"
-    "MAX,fourgon,\"Place Salvador Allende, Créteil\"\n"
+    "KEN,scoot_banlieue_proche,\"Le Marais, Paris\"\n"
+    "MEH,scoot_banlieue_proche,\"Place du Tertre, Montmartre, Paris\"\n"
+    "LIM,scoot_banlieue_proche,\"Place du 18 Juin 1940, Montparnasse, Paris\"\n"
+    "MIC,scoot_banlieue_proche,\"Batignolles, Paris\"\n"
+    "MAT,scoot_banlieue_proche,\"Place de la Nation, Paris\"\n"
+    "JC,scoot_banlieue_loin,\"Place du 8 mai 1945, Saint-Denis\"\n"
+    "MEF,scoot_banlieue_loin,\"Place Salvador Allende, Créteil\"\n"
+    "ABD,scoot_banlieue_loin,\"Place de la République, Bondy\"\n"
+    "JEA,longue_distance,\"Aéroport d'Orly, Paray-Vieille-Poste\"\n"
+    "SET,longue_distance,\"Aéroport Charles de Gaulle, Roissy\"\n"
+    "LAH,fourgon,\"Place d'Armes, Versailles\"\n"
+    "CAR,fourgon,\"Place Robespierre, Vitry-sur-Seine\"\n"
 )
 
-# Le modèle commandes n'utilise que des adresses (plus de lat/lon à saisir)
+# Modèle commandes : adresses + client_tier + deadline_minutes
 ORDERS_TEMPLATE_CSV = (
-    "id,adresse_ramassage,adresse_livraison,zone,volume_type\n"
-    "ORD-001,\"12 rue de Rivoli, Paris\",\"Place du Tertre, Montmartre, Paris\",Paris,Standard\n"
-    "ORD-002,\"Place de la Bastille, Paris\",\"Gare du Nord, Paris\",Paris,Volume\n"
-    "ORD-003,\"Place du 8 mai 1945, Saint-Denis\",\"Mairie de Pantin\",Petite_Couronne,Standard\n"
-    "ORD-004,\"Place d'Armes, Versailles\",\"Gare de Versailles Chantiers\",Grande_Couronne,Voiture\n"
+    "id,adresse_ramassage,adresse_livraison,zone,volume_type,client_tier,deadline_minutes\n"
+    "ORD-001,\"12 rue de Rivoli, Paris\",\"Place du Tertre, Montmartre, Paris\",Paris,Standard,standard,45\n"
+    "ORD-002,\"Place de la Bastille, Paris\",\"Gare du Nord, Paris\",Paris,Volume,premium,30\n"
+    "ORD-003,\"Place du 8 mai 1945, Saint-Denis\",\"Mairie de Pantin\",Petite_Couronne,Standard,standard,\n"
+    "ORD-004,\"Place d'Armes, Versailles\",\"Gare de Versailles Chantiers\",Grande_Couronne,Voiture,premium,90\n"
 )
 
 
@@ -256,16 +262,20 @@ async def upload_orders(file: UploadFile = File(...)) -> dict:
 
     for i, row in enumerate(rows, start=2):
         order_id = row.get("id", "").strip() or f"UP-{uuid.uuid4().hex[:6].upper()}"
-        zone_raw = row.get("zone", "").strip()
-        vol_raw = row.get("volume_type", "").strip()
+        zone_raw   = row.get("zone", "").strip()
+        vol_raw    = row.get("volume_type", "").strip()
+        tier_raw   = row.get("client_tier", "standard").strip() or "standard"
+        dl_raw     = row.get("deadline_minutes", "").strip()
 
         # Détection du format : adresse ou coordonnées ?
         pickup_addr   = row.get("adresse_ramassage", "").strip()
         delivery_addr = row.get("adresse_livraison", "").strip()
 
         try:
-            zone = Zone(zone_raw)
+            zone        = Zone(zone_raw)
             volume_type = VolumeType(vol_raw)
+            client_tier = ClientTier(tier_raw)
+            deadline_minutes: Optional[int] = int(dl_raw) if dl_raw.isdigit() else None
 
             if pickup_addr and delivery_addr:
                 # Format adresse → géocodage avec pause pour respecter Nominatim
@@ -294,6 +304,8 @@ async def upload_orders(file: UploadFile = File(...)) -> dict:
             delivery=Coordinates(lat=delivery_lat, lon=delivery_lon),
             zone=zone,
             volume_type=volume_type,
+            client_tier=client_tier,
+            deadline_minutes=deadline_minutes,
         )
         fleet_manager.add_order(order)
         result = dispatch_order(order, fleet_manager)
