@@ -860,14 +860,14 @@ function storeResult(data) { allResults.unshift(data); }
 async function refreshResults() {
   const res = await fetch('/orders');
   const orders = await res.json();
-  const assigned   = orders.filter(o => o.status !== 'unassignable');
+  const assigned   = orders.filter(o => o.status === 'assigned');
   const unassigned = orders.filter(o => o.status === 'unassignable');
   const scores = allResults.filter(r => r.success && r.score != null).map(r => r.score);
   const avg = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(2) : '—';
-  document.getElementById('stat-total').textContent     = orders.length;
-  document.getElementById('stat-assigned').textContent  = assigned.length;
-  document.getElementById('stat-unassigned').textContent= unassigned.length;
-  document.getElementById('stat-score').textContent     = avg;
+  document.getElementById('stat-total').textContent      = orders.length;
+  document.getElementById('stat-assigned').textContent   = assigned.length;
+  document.getElementById('stat-unassigned').textContent = unassigned.length;
+  document.getElementById('stat-score').textContent      = avg;
 
   const tbody = document.getElementById('results-tbody');
   if (!orders.length) {
@@ -876,18 +876,100 @@ async function refreshResults() {
   }
   const rMap = {}; allResults.forEach(r => { rMap[r.order_id] = r; });
   tbody.innerHTML = [...orders].reverse().map(o => {
-    const r = rMap[o.id] || {};
-    const ok = o.status !== 'unassignable';
-    return `<tr class="border-b border-gray-50 hover:bg-gray-50 result-row-enter">
-      <td class="py-2.5 pr-3 font-mono text-xs font-semibold text-gray-700">${o.id}</td>
-      <td class="py-2.5 pr-3 text-xs text-gray-500">${o.zone.replace('_',' ')}</td>
+    const r   = rMap[o.id] || {};
+    const ok  = o.status === 'assigned';
+    const tierBadge = o.client_tier === 'premium'
+      ? '<span class="text-yellow-600 text-xs">⭐</span>'
+      : '';
+    return `<tr class="border-b border-gray-50 hover:bg-green-50 result-row-enter cursor-pointer"
+        onclick="openOrderDetail('${o.id}', ${JSON.stringify({...o, ...r}).replace(/'/g,"&#39;")})">
+      <td class="py-2.5 pr-3 font-mono text-xs font-semibold text-gray-700">${o.id} ${tierBadge}</td>
+      <td class="py-2.5 pr-3 text-xs text-gray-500">${o.zone.replace(/_/g,' ')}</td>
       <td class="py-2.5 pr-3"><span class="badge-vehicle px-2 py-0.5 rounded-full text-xs">${o.volume_type}</span></td>
       <td class="py-2.5 pr-3 font-mono font-bold text-sm" style="color:${ok?courierColor(o.assigned_coursier||''):'#9CA3AF'}">${o.assigned_coursier||'—'}</td>
       <td class="py-2.5 pr-3 text-xs text-gray-600">${r.score!=null?r.score+' km':'—'}</td>
       <td class="py-2.5 pr-3"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${ok?'badge-assigned':'badge-unassigned'}">${ok?'✅ Assignée':'❌ Non assignée'}</span></td>
-      <td class="py-2.5 text-xs text-gray-400 max-w-xs truncate" title="${r.reason||''}">${r.reason||'—'}</td>
+      <td class="py-2.5 text-right pr-1"><span class="text-gray-300 hover:text-gray-500 text-sm">→</span></td>
     </tr>`;
   }).join('');
+}
+
+// ─── Détail d'une commande ───
+function openOrderDetail(orderId, merged) {
+  const ok = merged.status === 'assigned';
+  const tier = merged.client_tier === 'premium' ? '⭐ Premium' : '⬜ Standard';
+  const deadline = merged.deadline_minutes ? `${merged.deadline_minutes} min` : '—';
+  const score  = merged.score   != null ? merged.score + ' km' : '—';
+  const reason = merged.reason  || '—';
+  const pickup_lat   = merged.pickup_lat   ?? merged.order?.pickup_lat   ?? '—';
+  const pickup_lon   = merged.pickup_lon   ?? merged.order?.pickup_lon   ?? '—';
+  const delivery_lat = merged.delivery_lat ?? merged.order?.delivery_lat ?? '—';
+  const delivery_lon = merged.delivery_lon ?? merged.order?.delivery_lon ?? '—';
+  const fmtCoord = (lat, lon) => (lat !== '—' && lon !== '—')
+    ? `${parseFloat(lat).toFixed(5)}, ${parseFloat(lon).toFixed(5)}`
+    : '—';
+
+  const body = `
+    <div class="flex gap-2 mb-5">
+      <span class="px-3 py-1 rounded-full text-sm font-semibold ${ok?'badge-assigned':'badge-unassigned'}">
+        ${ok ? '✅ Assignée' : '❌ Non assignée'}
+      </span>
+      <span class="px-3 py-1 rounded-full text-sm font-medium badge-vehicle">${merged.volume_type||'—'}</span>
+      <span class="px-3 py-1 rounded-full text-sm font-medium ${merged.client_tier==='premium'?'bg-yellow-100 text-yellow-800':'bg-gray-100 text-gray-600'}">${tier}</span>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div class="bg-gray-50 rounded-xl p-3">
+        <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Zone</p>
+        <p class="font-semibold text-gray-800">${(merged.zone||'').replace(/_/g,' ')}</p>
+      </div>
+      <div class="bg-gray-50 rounded-xl p-3">
+        <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Délai</p>
+        <p class="font-semibold text-gray-800">${deadline}</p>
+      </div>
+    </div>
+
+    <div class="flex flex-col gap-2 mb-4">
+      <div class="bg-blue-50 border border-blue-100 rounded-xl p-3 flex items-start gap-3">
+        <span class="text-lg shrink-0">📍</span>
+        <div>
+          <p class="text-xs text-blue-600 font-semibold uppercase tracking-wide">Ramassage</p>
+          <p class="font-mono text-sm text-gray-700 mt-0.5">${fmtCoord(pickup_lat, pickup_lon)}</p>
+        </div>
+      </div>
+      <div class="bg-gray-50 border border-gray-100 rounded-xl p-3 flex items-start gap-3">
+        <span class="text-lg shrink-0">🏁</span>
+        <div>
+          <p class="text-xs text-gray-500 font-semibold uppercase tracking-wide">Livraison</p>
+          <p class="font-mono text-sm text-gray-700 mt-0.5">${fmtCoord(delivery_lat, delivery_lon)}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="border-t pt-4 flex flex-col gap-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">Coursier attribué</span>
+        <span class="font-mono font-bold text-lg" style="color:${ok?courierColor(merged.assigned_coursier||merged.assigned_to||''):'#9CA3AF'}">
+          ${merged.assigned_coursier || merged.assigned_to || '—'}
+        </span>
+      </div>
+      <div class="flex items-center justify-between">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">Score</span>
+        <span class="font-semibold text-gray-800">${score}</span>
+      </div>
+      <div class="bg-gray-50 rounded-xl p-3">
+        <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Moteur de dispatch</p>
+        <p class="text-sm text-gray-600 leading-relaxed">${reason}</p>
+      </div>
+    </div>`;
+
+  // Réutilise le modal CSV
+  document.getElementById('csv-modal-title').innerHTML =
+    `<span class="font-mono">${orderId}</span>`;
+  document.getElementById('csv-modal-stats').innerHTML  = body;
+  document.getElementById('csv-modal-thead').innerHTML  = '';
+  document.getElementById('csv-modal-tbody').innerHTML  = '';
+  document.getElementById('csv-modal').classList.add('open');
 }
 
 // ─── Upload fichiers ───

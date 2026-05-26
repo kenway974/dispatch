@@ -82,7 +82,7 @@ class FleetManager:
         coursier.position = GpsPosition(lat=lat, lon=lon)
         return coursier
 
-    def assign_order_to_courier(self, order: Order, courier_code: str) -> None:
+    def assign_order_to_coursier(self, order: Order, coursier_code: str) -> None:
         """
         Attribue une commande à un coursier :
         - Ajoute un AssignedOrder dans la liste du coursier
@@ -90,14 +90,14 @@ class FleetManager:
 
         Args:
             order        : La commande à attribuer.
-            courier_code : Code du coursier destinataire.
+            coursier_code : Code du coursier destinataire.
 
         Raises:
             KeyError: Si le coursier est introuvable.
         """
-        coursier = self._coursiers.get(courier_code.upper())
+        coursier = self._coursiers.get(coursier_code.upper())
         if coursier is None:
-            raise KeyError(f"Coursier '{courier_code}' introuvable.")
+            raise KeyError(f"Coursier '{coursier_code}' introuvable.")
 
         # Crée le snapshot léger pour le coursier
         assigned = AssignedOrder(
@@ -112,17 +112,17 @@ class FleetManager:
 
         # Met à jour la commande
         order.status = OrderStatus.ASSIGNED
-        order.assigned_coursier = courier_code.upper()
+        order.assigned_coursier = coursier_code.upper()
 
-    def remove_order_from_courier(self, order_id: str, courier_code: str) -> None:
+    def remove_order_from_coursier(self, order_id: str, coursier_code: str) -> None:
         """
         Retire une commande du portefeuille d'un coursier (après livraison ou annulation).
 
         Args:
             order_id     : Identifiant de la commande à retirer.
-            courier_code : Code du coursier concerné.
+            coursier_code : Code du coursier concerné.
         """
-        coursier = self._coursiers.get(courier_code.upper())
+        coursier = self._coursiers.get(coursier_code.upper())
         if coursier is None:
             return
         coursier.assigned_orders = [o for o in coursier.assigned_orders if o.order_id != order_id]
@@ -194,7 +194,7 @@ class FleetManager:
         self._orders.clear()
 
     @property
-    def courier_count(self) -> int:
+    def coursier_count(self) -> int:
         return len(self._coursiers)
 
     @property

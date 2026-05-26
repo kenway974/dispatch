@@ -222,7 +222,7 @@ def score_coursier(coursier: Coursier, order: Order) -> float:
 
 def get_coursiers_eligibles(order: Order, fleet: FleetManager) -> List[Coursier]:
     """Retourne tous les coursiers actifs éligibles pour cette commande."""
-    return [c for c in fleet.get_active_couriers() if is_coursier_eligible(c, order)]
+    return [c for c in fleet.get_active_coursiers() if is_coursier_eligible(c, order)]
 
 
 def find_best_coursier(order: Order, fleet: FleetManager) -> Optional[tuple[Coursier, float]]:
@@ -238,8 +238,8 @@ def find_best_coursier(order: Order, fleet: FleetManager) -> Optional[tuple[Cour
 
     scored = [(score_coursier(c, order), c) for c in eligible]
     scored.sort(key=lambda x: x[0])
-    best_score, best_courier = scored[0]
-    return best_courier, best_score
+    best_score, best_coursier = scored[0]
+    return best_coursier, best_score
 
 
 # ---------------------------------------------------------------------------
@@ -278,8 +278,8 @@ def dispatch_order(order: Order, fleet: FleetManager) -> DispatchResult:
             eligible_count=eligible_count,
         )
 
-    best_courier, best_score = result
-    fleet.assign_order_to_courier(order, best_courier.code)
+    best_coursier, best_score = result
+    fleet.assign_order_to_coursier(order, best_coursier.code)
 
     urgency_label = f" | urgence {order.urgency_score:.0%}" if order.deadline_minutes else ""
     tier_label    = " [PREMIUM]" if order.is_premium else ""
@@ -287,12 +287,12 @@ def dispatch_order(order: Order, fleet: FleetManager) -> DispatchResult:
     return DispatchResult(
         success=True,
         order_id=order.id,
-        assigned_to=best_courier.code,
+        assigned_to=best_coursier.code,
         score=round(best_score, 3),
         reason=(
-            f"Coursier «{best_courier.code}» assigné{tier_label}"
+            f"Coursier «{best_coursier.code}» assigné{tier_label}"
             f" — score {best_score:.2f} km"
-            f" | charge {best_courier.current_load}/{best_courier.max_load}"
+            f" | charge {best_coursier.current_load}/{best_coursier.max_load}"
             f"{urgency_label}."
         ),
         eligible_count=eligible_count,
