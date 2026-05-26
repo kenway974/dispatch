@@ -6,12 +6,14 @@ Sert la page HTML et gère les uploads CSV/Excel pour la flotte et les commandes
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import uuid
 from pathlib import Path
 from typing import Any
 
+import httpx
 import openpyxl
 from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -54,30 +56,64 @@ def reset_demo() -> dict:
 # Téléchargement des modèles CSV
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Géocodage via Nominatim (OpenStreetMap) — sans clé API
+# ---------------------------------------------------------------------------
+
+async def geocode_address(address: str) -> tuple[float, float]:
+    """
+    Convertit une adresse texte en coordonnées GPS (lat, lon) via Nominatim.
+    Priorité à la France mais accepte les adresses internationales.
+
+    Raises:
+        ValueError: Si l'adresse n'est pas trouvée.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": address, "format": "json", "limit": 1, "countrycodes": "fr"},
+            headers={"User-Agent": "DispatchEngine-Demo/1.0", "Accept-Language": "fr"},
+        )
+        data = resp.json()
+        if not data:
+            # Retry sans restriction de pays
+            resp2 = await client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": address, "format": "json", "limit": 1},
+                headers={"User-Agent": "DispatchEngine-Demo/1.0"},
+            )
+            data = resp2.json()
+        if not data:
+            raise ValueError(f"Adresse introuvable : « {address} »")
+        return float(data[0]["lat"]), float(data[0]["lon"])
+
+
+# Templates CSV
 FLEET_TEMPLATE_CSV = (
-    "code,vehicle_type,lat,lon\n"
-    "KEN,scoot_ville,48.8566,2.3522\n"
-    "THO,scoot_ville,48.8864,2.3432\n"
-    "ALI,scoot_ville,48.8533,2.3692\n"
-    "MAR,scoot_banlieue_proche,48.9360,2.3553\n"
-    "LEA,scoot_banlieue_proche,48.8948,2.3833\n"
-    "SAM,scoot_banlieue_loin,48.9906,2.3797\n"
-    "FOU,fourgon,48.8045,2.1200\n"
-    "MAX,fourgon,48.7773,2.4555\n"
+    "code,vehicle_type,adresse\n"
+    "KEN,scoot_ville,\"Île de la Cité, Paris\"\n"
+    "THO,scoot_ville,\"18 Place du Tertre, Montmartre, Paris\"\n"
+    "ALI,scoot_ville,\"Place de la Bastille, Paris\"\n"
+    "MAR,scoot_banlieue_proche,\"Place du 8 mai 1945, Saint-Denis\"\n"
+    "LEA,scoot_banlieue_proche,\"Place de la République, Aubervilliers\"\n"
+    "SAM,scoot_banlieue_loin,\"Place des Fêtes, Sarcelles\"\n"
+    "FOU,fourgon,\"Place d'Armes, Versailles\"\n"
+    "MAX,fourgon,\"Place Salvador Allende, Créteil\"\n"
 )
 
+# Le modèle commandes n'utilise que des adresses (plus de lat/lon à saisir)
 ORDERS_TEMPLATE_CSV = (
-    "id,pickup_lat,pickup_lon,delivery_lat,delivery_lon,zone,volume_type\n"
-    "ORD-001,48.8559,2.3578,48.8864,2.3432,Paris,Standard\n"
-    "ORD-002,48.8533,2.3692,48.8948,2.3833,Paris,Volume\n"
-    "ORD-003,48.9360,2.3553,48.9500,2.3700,Petite_Couronne,Standard\n"
-    "ORD-004,48.8045,2.1200,48.7700,2.0800,Grande_Couronne,Voiture\n"
+    "id,adresse_ramassage,adresse_livraison,zone,volume_type\n"
+    "ORD-001,\"12 rue de Rivoli, Paris\",\"Place du Tertre, Montmartre, Paris\",Paris,Standard\n"
+    "ORD-002,\"Place de la Bastille, Paris\",\"Gare du Nord, Paris\",Paris,Volume\n"
+    "ORD-003,\"Place du 8 mai 1945, Saint-Denis\",\"Mairie de Pantin\",Petite_Couronne,Standard\n"
+    "ORD-004,\"Place d'Armes, Versailles\",\"Gare de Versailles Chantiers\",Grande_Couronne,Voiture\n"
 )
 
 
 @router.get("/demo/templates/fleet", include_in_schema=False)
 def download_fleet_template():
-    """Télécharge le modèle CSV pour importer une flotte."""
+    """Télécharge le modèle CSV pour importer une flotte (avec adresses)."""
     return StreamingResponse(
         io.StringIO(FLEET_TEMPLATE_CSV),
         media_type="text/csv",
@@ -87,7 +123,7 @@ def download_fleet_template():
 
 @router.get("/demo/templates/orders", include_in_schema=False)
 def download_orders_template():
-    """Télécharge le modèle CSV pour importer des commandes."""
+    """Télécharge le modèle CSV pour importer des commandes (avec adresses)."""
     return StreamingResponse(
         io.StringIO(ORDERS_TEMPLATE_CSV),
         media_type="text/csv",
@@ -142,7 +178,9 @@ async def upload_fleet(file: UploadFile = File(...)) -> dict:
     """
     Importe une flotte depuis un fichier CSV ou Excel.
 
-    Colonnes attendues : code, vehicle_type, lat, lon
+    Accepte deux formats :
+    - GPS     : code, vehicle_type, lat, lon
+    - Adresse : code, vehicle_type, adresse   ← géocodé automatiquement via Nominatim
     Retourne un résumé : ajoutés, ignorés (doublons), erreurs de format.
     """
     content = await file.read()
@@ -155,16 +193,23 @@ async def upload_fleet(file: UploadFile = File(...)) -> dict:
     for i, row in enumerate(rows, start=2):  # start=2 car ligne 1 = headers
         code = row.get("code", "").upper().strip()
         vehicle_type_raw = row.get("vehicle_type", "").strip()
-        lat_raw = row.get("lat", "")
-        lon_raw = row.get("lon", "")
+        adresse = row.get("adresse", "").strip()
+        lat_raw = row.get("lat", "").strip()
+        lon_raw = row.get("lon", "").strip()
 
-        # Validation
         try:
             if not code or len(code) != 3:
                 raise ValueError(f"Code invalide : '{code}' (doit faire 3 lettres)")
             vehicle_type = VehicleType(vehicle_type_raw)
-            lat = float(lat_raw)
-            lon = float(lon_raw)
+
+            # Résolution des coordonnées : adresse prioritaire sur lat/lon
+            if adresse:
+                await asyncio.sleep(1.1)  # Nominatim : max 1 requête/seconde
+                lat, lon = await geocode_address(adresse)
+            else:
+                lat = float(lat_raw)
+                lon = float(lon_raw)
+
         except ValueError as e:
             errors.append({"row": i, "code": code, "reason": str(e)})
             continue
@@ -177,7 +222,7 @@ async def upload_fleet(file: UploadFile = File(...)) -> dict:
                 position=GpsPosition(lat=lat, lon=lon),
             )
             fleet_manager.add_courier(courier)
-            added.append({"code": code, "vehicle_type": vehicle_type, "lat": lat, "lon": lon})
+            added.append({"code": code, "vehicle_type": str(vehicle_type), "lat": lat, "lon": lon})
         except ValueError:
             skipped.append({"code": code, "reason": "Code déjà enregistré"})
 
@@ -198,7 +243,9 @@ async def upload_orders(file: UploadFile = File(...)) -> dict:
     """
     Importe et dispatche des commandes depuis un fichier CSV ou Excel.
 
-    Colonnes attendues : id, pickup_lat, pickup_lon, delivery_lat, delivery_lon, zone, volume_type
+    Accepte deux formats :
+    - Adresse : id, adresse_ramassage, adresse_livraison, zone, volume_type  ← géocodé auto
+    - GPS     : id, pickup_lat, pickup_lon, delivery_lat, delivery_lon, zone, volume_type
     Chaque commande est immédiatement soumise au moteur de dispatch.
     """
     content = await file.read()
@@ -212,13 +259,27 @@ async def upload_orders(file: UploadFile = File(...)) -> dict:
         zone_raw = row.get("zone", "").strip()
         vol_raw = row.get("volume_type", "").strip()
 
+        # Détection du format : adresse ou coordonnées ?
+        pickup_addr   = row.get("adresse_ramassage", "").strip()
+        delivery_addr = row.get("adresse_livraison", "").strip()
+
         try:
             zone = Zone(zone_raw)
             volume_type = VolumeType(vol_raw)
-            pickup_lat = float(row.get("pickup_lat", 0))
-            pickup_lon = float(row.get("pickup_lon", 0))
-            delivery_lat = float(row.get("delivery_lat", 0))
-            delivery_lon = float(row.get("delivery_lon", 0))
+
+            if pickup_addr and delivery_addr:
+                # Format adresse → géocodage avec pause pour respecter Nominatim
+                await asyncio.sleep(1.1)
+                pickup_lat, pickup_lon = await geocode_address(pickup_addr)
+                await asyncio.sleep(1.1)
+                delivery_lat, delivery_lon = await geocode_address(delivery_addr)
+            else:
+                # Format GPS direct
+                pickup_lat    = float(row.get("pickup_lat", 0))
+                pickup_lon    = float(row.get("pickup_lon", 0))
+                delivery_lat  = float(row.get("delivery_lat", 0))
+                delivery_lon  = float(row.get("delivery_lon", 0))
+
         except (ValueError, KeyError) as e:
             parse_errors.append({"row": i, "id": order_id, "reason": str(e)})
             continue
