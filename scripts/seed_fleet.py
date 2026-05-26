@@ -1,70 +1,102 @@
 """
-Script de peuplement de la flotte avec des coursiers de démonstration.
+Script de peuplement de la flotte officielle.
 
 Lance l'API puis exécute ce script pour avoir une flotte prête à tester :
     python scripts/seed_fleet.py
 
-Les coursiers sont positionnés sur des points réels de Paris et sa banlieue.
+Flotte officielle — 12 coursiers :
+  scoot_banlieue_proche (Paris + Petite Couronne, 50cc) : KEN, MEH, LIM, MIC, MAT
+  scoot_banlieue_loin   (Petite + Grande Couronne, 125cc+) : JC, MEF, ABD
+  longue_distance        (toutes zones) : JEA, SET
+  fourgon                (toutes zones, colis Voiture) : LAH, CAR
 """
 
 import httpx
 
 BASE_URL = "http://localhost:8000"
 
-# Données de la flotte de démonstration
-# Coordonnées réelles des zones concernées
+# ---------------------------------------------------------------------------
+# Flotte officielle — positions GPS réalistes dans et autour de Paris
+# ---------------------------------------------------------------------------
 COURIERS = [
-    # ---- Paris intra-muros (scoot_ville) ----
+    # ── scoot_banlieue_proche — Paris intra-muros + Petite Couronne (50cc) ──
     {
         "code": "KEN",
-        "vehicle_type": "scoot_ville",
-        "lat": 48.8566,   # Paris centre (Île de la Cité)
-        "lon": 2.3522,
-    },
-    {
-        "code": "THO",
-        "vehicle_type": "scoot_ville",
-        "lat": 48.8864,   # Montmartre
-        "lon": 2.3432,
-    },
-    {
-        "code": "ALI",
-        "vehicle_type": "scoot_ville",
-        "lat": 48.8533,   # Bastille
-        "lon": 2.3692,
-    },
-    # ---- Petite Couronne (scoot_banlieue_proche) ----
-    {
-        "code": "MAR",
         "vehicle_type": "scoot_banlieue_proche",
-        "lat": 48.9360,   # Saint-Denis
+        "lat": 48.8559,   # Paris 4e — Le Marais
+        "lon": 2.3578,
+    },
+    {
+        "code": "MEH",
+        "vehicle_type": "scoot_banlieue_proche",
+        "lat": 48.8780,   # Paris 18e — Montmartre
+        "lon": 2.3430,
+    },
+    {
+        "code": "LIM",
+        "vehicle_type": "scoot_banlieue_proche",
+        "lat": 48.8458,   # Paris 14e — Montparnasse
+        "lon": 2.3358,
+    },
+    {
+        "code": "MIC",
+        "vehicle_type": "scoot_banlieue_proche",
+        "lat": 48.8700,   # Paris 17e — Batignolles
+        "lon": 2.3200,
+    },
+    {
+        "code": "MAT",
+        "vehicle_type": "scoot_banlieue_proche",
+        "lat": 48.8494,   # Paris 12e — Nation
+        "lon": 2.3950,
+    },
+
+    # ── scoot_banlieue_loin — Petite + Grande Couronne (125cc+, voies rapides OK) ──
+    {
+        "code": "JC",
+        "vehicle_type": "scoot_banlieue_loin",
+        "lat": 48.9360,   # Saint-Denis (93)
         "lon": 2.3553,
     },
     {
-        "code": "LEA",
-        "vehicle_type": "scoot_banlieue_proche",
-        "lat": 48.8948,   # Aubervilliers
-        "lon": 2.3833,
-    },
-    # ---- Grande Couronne (scoot_banlieue_loin) ----
-    {
-        "code": "SAM",
+        "code": "MEF",
         "vehicle_type": "scoot_banlieue_loin",
-        "lat": 48.9906,   # Sarcelles
-        "lon": 2.3797,
+        "lat": 48.7900,   # Créteil (94)
+        "lon": 2.4560,
     },
-    # ---- Fourgon (Grande Couronne + Voiture) ----
     {
-        "code": "FOU",
+        "code": "ABD",
+        "vehicle_type": "scoot_banlieue_loin",
+        "lat": 48.9050,   # Bondy (93)
+        "lon": 2.4830,
+    },
+
+    # ── longue_distance — spécialisé inter-villes et aéroports ──
+    {
+        "code": "JEA",
+        "vehicle_type": "longue_distance",
+        "lat": 48.7262,   # Orly / Paray-Vieille-Poste (94)
+        "lon": 2.3596,
+    },
+    {
+        "code": "SET",
+        "vehicle_type": "longue_distance",
+        "lat": 49.0097,   # Roissy-CDG (95)
+        "lon": 2.5479,
+    },
+
+    # ── fourgon — colis Voiture, toutes zones ──
+    {
+        "code": "LAH",
         "vehicle_type": "fourgon",
-        "lat": 48.8045,   # Versailles
+        "lat": 48.8045,   # Versailles / Le Chesnay (78)
         "lon": 2.1200,
     },
     {
-        "code": "MAX",
+        "code": "CAR",
         "vehicle_type": "fourgon",
-        "lat": 48.7773,   # Créteil
-        "lon": 2.4555,
+        "lat": 48.7773,   # Vitry-sur-Seine (94)
+        "lon": 2.4007,
     },
 ]
 
@@ -83,7 +115,7 @@ def seed() -> None:
             resp = client.post("/couriers", json=data)
             if resp.status_code == 201:
                 c = resp.json()
-                print(f"  ✓ {c['code']} ({c['vehicle_type']}) — position ({c['lat']}, {c['lon']})")
+                print(f"  ✓ {c['code']:3s} ({c['vehicle_type']:24s}) — ({c['lat']:.4f}, {c['lon']:.4f})")
             elif resp.status_code == 409:
                 print(f"  ~ {data['code']} déjà enregistré, ignoré.")
             else:
@@ -92,7 +124,7 @@ def seed() -> None:
         # Résumé final
         resp = client.get("/health")
         h = resp.json()
-        print(f"\nFlotte prête : {h['active_couriers']} coursiers actifs.")
+        print(f"\nFlotte prête : {h['active_couriers']} coursiers actifs sur {h['courier_count']} enregistrés.")
 
 
 if __name__ == "__main__":
