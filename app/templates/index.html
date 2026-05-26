@@ -35,6 +35,20 @@
     @keyframes spin { to{transform:rotate(360deg)} }
     .map-hint-bar { display:none; background:#EFF6FF; border:1px solid #93C5FD; color:#1D4ED8; border-radius:8px; padding:8px 12px; font-size:.8rem; font-weight:600; }
     .map-hint-bar.visible { display:flex; align-items:center; gap:8px; }
+    /* Modals */
+    .modal-overlay { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; }
+    .modal-overlay.open { display:flex; }
+    .modal-box { background:white; border-radius:16px; box-shadow:0 8px 40px rgba(0,0,0,.25); width:100%; max-width:520px; margin:1rem; max-height:90vh; overflow-y:auto; }
+    .modal-box.wide { max-width:760px; }
+    /* Toggle switch */
+    .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; }
+    .toggle-switch input { opacity:0; width:0; height:0; }
+    .toggle-slider { position:absolute; inset:0; background:#D1D5DB; border-radius:24px; transition:.2s; cursor:pointer; }
+    .toggle-slider:before { content:""; position:absolute; width:18px; height:18px; left:3px; top:3px; background:white; border-radius:50%; transition:.2s; }
+    .toggle-switch input:checked + .toggle-slider { background:var(--green-mid); }
+    .toggle-switch input:checked + .toggle-slider:before { transform:translateX(20px); }
+    /* Badge saturé */
+    .badge-saturated { background:#FEE2E2; color:#991B1B; }
   </style>
 </head>
 <body>
@@ -81,7 +95,7 @@
         <!-- Formulaire coursier -->
         <div class="card p-5">
           <h2 class="font-semibold text-gray-800 mb-4">✏️ Ajouter un coursier</h2>
-          <form id="courier-form" onsubmit="submitCourierForm(event)" class="flex flex-col gap-3">
+          <form id="coursier-form" onsubmit="submitCoursierForm(event)" class="flex flex-col gap-3">
 
             <div class="grid grid-cols-2 gap-2">
               <div>
@@ -116,7 +130,7 @@
                     class="addr-input flex-1"/>
                   <div id="c-addr-spinner" class="geocoding-spinner shrink-0"></div>
                 </div>
-                <button type="button" onclick="setMapMode('courier')"
+                <button type="button" onclick="setMapMode("coursier")"
                   class="mt-1 text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-medium">
                   📍 Ou cliquer directement sur la carte →
                 </button>
@@ -132,7 +146,7 @@
                   <label class="text-xs text-gray-500 mb-1 block">Longitude</label>
                   <input id="c-lon" type="number" step="any" value="2.3522"  class="addr-input font-mono"/>
                 </div>
-                <button type="button" onclick="setMapMode('courier')"
+                <button type="button" onclick="setMapMode("coursier")"
                   class="col-span-2 text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-medium">
                   📍 Ou cliquer directement sur la carte →
                 </button>
@@ -183,11 +197,12 @@
             <thead>
               <tr class="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-b">
                 <th class="pb-2 pr-4">Code</th><th class="pb-2 pr-4">Véhicule</th>
-                <th class="pb-2 pr-4">Position</th><th class="pb-2 pr-4">Charge</th><th class="pb-2">Statut</th>
+                <th class="pb-2 pr-4">Position</th><th class="pb-2 pr-4">Charge</th>
+                <th class="pb-2 pr-4">Statut</th><th class="pb-2"></th>
               </tr>
             </thead>
             <tbody id="fleet-tbody">
-              <tr><td colspan="5" class="py-8 text-center text-gray-400 text-sm">Aucun coursier — ajoutez-en ci-dessus.</td></tr>
+              <tr><td colspan="6" class="py-8 text-center text-gray-400 text-sm">Aucun coursier — ajoutez-en ci-dessus.</td></tr>
             </tbody>
           </table>
         </div>
@@ -386,11 +401,98 @@
 
 </main>
 
+<!-- ═══ MODAL ÉDITION COURSIER ═══ -->
+<div id="edit-modal" class="modal-overlay">
+  <div class="modal-box p-6">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-gray-800 text-lg">
+        ✏️ Modifier le coursier
+        <span id="edit-modal-code" class="font-mono ml-1" style="color:var(--green-mid)"></span>
+      </h3>
+      <button onclick="closeEditModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+    </div>
+    <form id="edit-form" onsubmit="saveEditCoursier(event)" class="flex flex-col gap-4">
+
+      <!-- Véhicule -->
+      <div>
+        <label class="text-xs font-medium text-gray-600 mb-1 block">Type de véhicule</label>
+        <select id="edit-vehicle" class="addr-input">
+          <option value="scoot_ville">🛵 Scoot Paris (50cc)</option>
+          <option value="scoot_banlieue_proche">🛵 Scoot Petite Couronne (50cc)</option>
+          <option value="scoot_banlieue_loin">🛵 Scoot Grande Couronne (125cc+)</option>
+          <option value="longue_distance">🚗 Longue Distance</option>
+          <option value="fourgon">🚐 Fourgon</option>
+        </select>
+      </div>
+
+      <!-- Nouvelle position -->
+      <div>
+        <label class="text-xs font-medium text-gray-600 mb-1 block">
+          Nouvelle position
+          <span class="text-gray-400 font-normal">(laisser vide = inchangée)</span>
+        </label>
+        <div class="flex gap-2 items-center">
+          <input id="edit-address" placeholder="Ex : Gare du Nord, Paris"
+            class="addr-input flex-1"/>
+          <div id="edit-addr-spinner" class="geocoding-spinner shrink-0"></div>
+        </div>
+      </div>
+
+      <!-- Actif / Inactif -->
+      <div class="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+        <div>
+          <p class="text-sm font-medium text-gray-700">Disponible</p>
+          <p class="text-xs text-gray-400 mt-0.5">Un coursier inactif ne reçoit plus d'attribution</p>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="edit-active" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="flex gap-3 mt-1">
+        <button type="button" onclick="closeEditModal()"
+          class="flex-1 border border-gray-200 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50 transition font-medium">
+          Annuler
+        </button>
+        <button type="submit" style="background:var(--green-mid)"
+          class="flex-1 text-white font-semibold py-2 rounded-lg hover:opacity-90 transition text-sm flex items-center justify-center gap-2">
+          <span id="edit-submit-icon">💾</span>
+          <span id="edit-submit-label">Enregistrer</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══ MODAL RÉSULTAT CSV ═══ -->
+<div id="csv-modal" class="modal-overlay">
+  <div id="csv-modal-box" class="modal-box wide p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="csv-modal-title" class="font-bold text-gray-800 text-lg"></h3>
+      <button onclick="closeCsvModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+    </div>
+    <!-- Stats capsules -->
+    <div id="csv-modal-stats" class="flex flex-wrap gap-3 mb-4"></div>
+    <!-- Table résultats -->
+    <div class="overflow-x-auto rounded-lg border border-gray-100">
+      <table class="w-full text-sm" id="csv-modal-table">
+        <thead id="csv-modal-thead" class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide"></thead>
+        <tbody id="csv-modal-tbody"></tbody>
+      </table>
+    </div>
+    <button onclick="closeCsvModal()" style="background:var(--green-mid)"
+      class="mt-4 w-full text-white font-semibold py-2.5 rounded-lg hover:opacity-90 transition text-sm">
+      Fermer
+    </button>
+  </div>
+</div>
+
 <!-- ═══ JS ═══ -->
 <script>
 // ─── État global ───
 let map, courierLayers = {}, dispatchLines = [], pickupMarkers = [], deliveryMarkers = [];
-let mapClickMode  = null;   // 'courier' | 'pickup' | 'delivery'
+let mapClickMode  = null;   // 'coursier' | 'pickup' | 'delivery'
 let courierMode   = 'adresse'; // 'adresse' | 'gps'
 let allResults    = [];
 // Coordonnées provisoires pour l'affichage sur carte avant soumission du formulaire ordre
@@ -454,7 +556,7 @@ function initMap() {
     const { lat, lng: lon } = e.latlng;
     const addr = await reverseGeocode(lat, lon);
 
-    if (mapClickMode === 'courier') {
+    if (mapClickMode === 'coursier') {
       if (courierMode === 'adresse') {
         document.getElementById('c-address').value = addr;
       } else {
@@ -495,7 +597,7 @@ function updatePreviewMarker(type, lat, lon) {
 
 function setMapMode(mode) {
   mapClickMode = mode;
-  const labels = { courier:'Cliquez pour placer le coursier', pickup:'Cliquez pour le point de ramassage', delivery:'Cliquez pour le point de livraison' };
+  const labels = { coursier:'Cliquez pour placer le coursier', pickup:'Cliquez pour le point de ramassage', delivery:'Cliquez pour le point de livraison' };
   document.getElementById('map-hint-text').textContent = labels[mode];
   document.getElementById('map-hint-bar').classList.add('visible');
   map.getContainer().style.cursor = 'crosshair';
@@ -578,7 +680,7 @@ function setCourierMode(mode) {
 }
 
 // ─── Formulaire coursier ───
-async function submitCourierForm(e) {
+async function submitCoursierForm(e) {
   e.preventDefault();
   const code = document.getElementById('c-code').value.trim().toUpperCase();
   setBtnLoading('c-submit-icon','c-submit-label','⏳','Géocodage...', true);
@@ -631,26 +733,38 @@ async function refreshCouriers() {
 function renderFleetTable(couriers) {
   const tbody = document.getElementById('fleet-tbody');
   if (!couriers.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-gray-400 text-sm">Aucun coursier — ajoutez-en ci-dessus.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-gray-400 text-sm">Aucun coursier — ajoutez-en ci-dessus.</td></tr>`;
     return;
   }
   tbody.innerHTML = couriers.map(c => {
     const pct = Math.round(c.current_load / c.max_load * 100);
     const barColor = pct >= 100 ? 'bg-red-400' : pct > 60 ? 'bg-yellow-400' : 'bg-green-400';
+    const saturated = pct >= 100;
     const vLabel = { scoot_ville:'🛵 Paris', scoot_banlieue_proche:'🛵 PC', scoot_banlieue_loin:'🛵 GC', longue_distance:'🚗 LD', fourgon:'🚐 Fourgon' }[c.vehicle_type] || c.vehicle_type;
-    return `<tr class="border-b border-gray-50 hover:bg-gray-50">
+    const statutHtml = saturated
+      ? `<span class="badge-saturated px-2 py-0.5 rounded-full text-xs font-semibold">🔴 Saturé</span>`
+      : c.is_active
+        ? `<span class="text-xs text-green-600 font-medium">● Actif</span>`
+        : `<span class="text-xs text-gray-400">○ Inactif</span>`;
+    return `<tr class="border-b border-gray-50 hover:bg-gray-50 ${saturated?'bg-red-50':''}">
       <td class="py-2.5 pr-4 font-mono font-bold" style="color:${courierColor(c.code)}">${c.code}</td>
       <td class="py-2.5 pr-4"><span class="badge-vehicle px-2 py-0.5 rounded-full text-xs font-medium">${vLabel}</span></td>
       <td class="py-2.5 pr-4 text-gray-500 text-xs font-mono">${c.lat.toFixed(4)}, ${c.lon.toFixed(4)}</td>
       <td class="py-2.5 pr-4">
         <div class="flex items-center gap-2">
           <div class="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-            <div class="h-full ${barColor} rounded-full" style="width:${pct}%"></div>
+            <div class="h-full ${barColor} rounded-full" style="width:${Math.min(pct,100)}%"></div>
           </div>
-          <span class="text-xs text-gray-500">${c.current_load}/${c.max_load}</span>
+          <span class="text-xs ${saturated?'text-red-600 font-semibold':'text-gray-500'}">${c.current_load}/${c.max_load}</span>
         </div>
       </td>
-      <td class="py-2.5"><span class="text-xs ${c.is_active?'text-green-600':'text-gray-400'}">${c.is_active?'● Actif':'○ Inactif'}</span></td>
+      <td class="py-2.5 pr-4">${statutHtml}</td>
+      <td class="py-2.5">
+        <button onclick="openEditModal('${c.code}')"
+          class="text-xs text-gray-400 hover:text-gray-700 border border-gray-200 hover:border-gray-400 px-2 py-1 rounded-lg transition font-medium">
+          ✏️ Modifier
+        </button>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -707,11 +821,11 @@ async function submitOrderForm(e) {
 
   if (data.success) {
     showToast(`✓ ${data.order_id} → ${data.assigned_to} (score : ${data.score} km)`, 'success');
-    const courier = await (await fetch(`/couriers/${data.assigned_to}`)).json();
+    const coursier = await (await fetch(`/coursiers/${data.assigned_to}`)).json();
     // Retire les marqueurs aperçu et dessine la ligne officielle
     if (previewPickupMarker)   { map.removeLayer(previewPickupMarker);   previewPickupMarker = null; }
     if (previewDeliveryMarker) { map.removeLayer(previewDeliveryMarker); previewDeliveryMarker = null; }
-    drawDispatchLine({ ...data, pickup_lat: pickup.lat, pickup_lon: pickup.lon, delivery_lat: delivery.lat, delivery_lon: delivery.lon }, courier.lat, courier.lon);
+    drawDispatchLine({ ...data, pickup_lat: pickup.lat, pickup_lon: pickup.lon, delivery_lat: delivery.lat, delivery_lon: delivery.lon }, coursier.lat, coursier.lon);
   } else {
     showToast(`⚠ ${data.order_id} — aucun coursier disponible`, 'warning');
   }
@@ -768,7 +882,7 @@ async function refreshResults() {
       <td class="py-2.5 pr-3 font-mono text-xs font-semibold text-gray-700">${o.id}</td>
       <td class="py-2.5 pr-3 text-xs text-gray-500">${o.zone.replace('_',' ')}</td>
       <td class="py-2.5 pr-3"><span class="badge-vehicle px-2 py-0.5 rounded-full text-xs">${o.volume_type}</span></td>
-      <td class="py-2.5 pr-3 font-mono font-bold text-sm" style="color:${ok?courierColor(o.assigned_courier||''):'#9CA3AF'}">${o.assigned_courier||'—'}</td>
+      <td class="py-2.5 pr-3 font-mono font-bold text-sm" style="color:${ok?courierColor(o.assigned_coursier||''):'#9CA3AF'}">${o.assigned_coursier||'—'}</td>
       <td class="py-2.5 pr-3 text-xs text-gray-600">${r.score!=null?r.score+' km':'—'}</td>
       <td class="py-2.5 pr-3"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${ok?'badge-assigned':'badge-unassigned'}">${ok?'✅ Assignée':'❌ Non assignée'}</span></td>
       <td class="py-2.5 text-xs text-gray-400 max-w-xs truncate" title="${r.reason||''}">${r.reason||'—'}</td>
@@ -783,13 +897,39 @@ async function uploadFleetFile(file) {
   const fd = new FormData(); fd.append('file', file);
   const res = await fetch('/demo/fleet/upload', { method:'POST', body:fd });
   const d = await res.json();
-  const el = document.getElementById('fleet-upload-result');
-  el.classList.remove('hidden');
-  el.className = `text-sm rounded-lg p-3 ${d.added>0?'bg-green-50 text-green-800':'bg-yellow-50 text-yellow-800'}`;
-  el.innerHTML = `✓ <b>${d.added}</b> coursier(s) ajouté(s)${d.skipped?` · ${d.skipped} doublon(s)`:''}${d.errors?` · <span class="text-red-600">${d.errors} erreur(s)</span>`:''}`;
   refreshCouriers();
-  showToast(`${d.added} coursier(s) importé(s)`, d.added>0?'success':'warning');
   document.getElementById('fleet-file').value = '';
+
+  // Stats capsules
+  const stats = [
+    statCapsule(d.added,   'Ajoutés',   'border-green-200 bg-green-50 text-green-800'),
+    statCapsule(d.skipped, 'Doublons',  'border-yellow-200 bg-yellow-50 text-yellow-700'),
+    statCapsule(d.errors,  'Erreurs',   'border-red-200 bg-red-50 text-red-700'),
+  ].join('');
+
+  // Table coursiers ajoutés
+  const thead = `<tr class="text-left"><th class="p-2">Code</th><th class="p-2">Véhicule</th><th class="p-2">Lat</th><th class="p-2">Lon</th></tr>`;
+  const rows = [
+    ...(d.details.added||[]).map(c =>
+      `<tr class="border-t border-gray-100 bg-green-50">
+        <td class="p-2 font-mono font-bold text-green-800">${c.code}</td>
+        <td class="p-2 text-xs text-gray-600">${c.vehicle_type}</td>
+        <td class="p-2 font-mono text-xs text-gray-500">${(+c.lat).toFixed(4)}</td>
+        <td class="p-2 font-mono text-xs text-gray-500">${(+c.lon).toFixed(4)}</td>
+      </tr>`),
+    ...(d.details.skipped||[]).map(s =>
+      `<tr class="border-t border-gray-100 bg-yellow-50">
+        <td class="p-2 font-mono font-bold text-yellow-700">${s.code}</td>
+        <td class="p-2 text-xs text-gray-500" colspan="3">${s.reason}</td>
+      </tr>`),
+    ...(d.details.errors||[]).map(err =>
+      `<tr class="border-t border-gray-100 bg-red-50">
+        <td class="p-2 font-mono font-bold text-red-600">${err.code||'—'}</td>
+        <td class="p-2 text-xs text-red-500" colspan="3">${err.reason}</td>
+      </tr>`),
+  ].join('') || `<tr><td colspan="4" class="p-4 text-center text-gray-400">Aucun résultat</td></tr>`;
+
+  openCsvModal('📋 Import flotte — résultats', stats, thead, rows);
 }
 
 async function uploadOrdersFile(file) {
@@ -798,18 +938,41 @@ async function uploadOrdersFile(file) {
   const fd = new FormData(); fd.append('file', file);
   const res = await fetch('/demo/orders/upload', { method:'POST', body:fd });
   const d = await res.json();
-  const el = document.getElementById('orders-upload-result');
-  el.classList.remove('hidden');
-  const pct = d.total>0 ? Math.round(d.assigned/d.total*100) : 0;
-  el.className = `text-sm rounded-lg p-3 ${pct===100?'bg-green-50 text-green-800':'bg-yellow-50 text-yellow-800'}`;
-  el.innerHTML = `⚡ <b>${d.assigned}/${d.total}</b> assignées (${pct}%)${d.unassignable?` · <span class="text-red-600">${d.unassignable} non assignée(s)</span>`:''}`;
   d.results.forEach(r => {
     storeResult(r);
     appendQuickResult({ success:r.success, order_id:r.order_id, assigned_to:r.assigned_to, score:r.score, order:{zone:r.zone,volume_type:r.volume_type} });
   });
   refreshCouriers(); refreshResults();
-  showToast(`${d.assigned}/${d.total} courses dispatchées`, 'success');
   document.getElementById('orders-file').value = '';
+
+  const pct = d.total>0 ? Math.round(d.assigned/d.total*100) : 0;
+  const stats = [
+    statCapsule(d.total,        'Courses',       'border-gray-200 bg-gray-50 text-gray-700'),
+    statCapsule(d.assigned,     'Assignées',     'border-green-200 bg-green-50 text-green-800'),
+    statCapsule(d.unassignable, 'Non assignées', 'border-red-200 bg-red-50 text-red-700'),
+    statCapsule(pct+'%',        'Taux',          pct===100?'border-green-300 bg-green-100 text-green-900':'border-yellow-200 bg-yellow-50 text-yellow-700'),
+  ].join('');
+
+  const thead = `<tr class="text-left"><th class="p-2">ID</th><th class="p-2">Zone</th><th class="p-2">Volume</th><th class="p-2">Coursier</th><th class="p-2">Score</th><th class="p-2">Statut</th></tr>`;
+  const rows = (d.results||[]).map(r => {
+    const ok = r.success;
+    return `<tr class="border-t border-gray-100 ${ok?'':'bg-red-50'}">
+      <td class="p-2 font-mono text-xs font-semibold text-gray-700">${r.order_id}</td>
+      <td class="p-2 text-xs text-gray-500">${String(r.zone).replace('_',' ')}</td>
+      <td class="p-2 text-xs text-gray-500">${r.volume_type}</td>
+      <td class="p-2 font-mono font-bold text-sm" style="color:${ok?courierColor(r.assigned_to||''):'#9CA3AF'}">${r.assigned_to||'—'}</td>
+      <td class="p-2 text-xs text-gray-600">${r.score!=null?r.score+' km':'—'}</td>
+      <td class="p-2"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${ok?'badge-assigned':'badge-unassigned'}">${ok?'✅':'❌'}</span></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="6" class="p-4 text-center text-gray-400">Aucun résultat</td></tr>`;
+
+  if (d.parse_errors>0) {
+    (d.errors||[]).forEach(err => {
+      rows += `<tr class="border-t bg-red-50"><td class="p-2 text-xs text-red-500 font-mono">${err.id}</td><td class="p-2 text-xs text-red-400" colspan="5">${err.reason}</td></tr>`;
+    });
+  }
+
+  openCsvModal(`⚡ Import commandes — ${d.assigned}/${d.total} assignées`, stats, thead, rows);
 }
 
 // ─── Drag & drop ───
@@ -855,6 +1018,78 @@ function setBtnLoading(iconId, labelId, icon, label, disabled) {
   document.getElementById(iconId).textContent  = icon;
   document.getElementById(labelId).textContent = label;
   document.getElementById(iconId).closest('button').disabled = disabled;
+}
+
+// ─── Modal édition coursier ───
+async function openEditModal(code) {
+  const res = await fetch(`/coursiers/${code}`);
+  if (!res.ok) { showToast('Coursier introuvable', 'error'); return; }
+  const c = await res.json();
+  document.getElementById('edit-modal-code').textContent = code;
+  document.getElementById('edit-modal-code').style.color = courierColor(code);
+  document.getElementById('edit-vehicle').value = c.vehicle_type;
+  document.getElementById('edit-address').value = '';
+  document.getElementById('edit-active').checked = c.is_active;
+  document.getElementById('edit-modal')._code = code;
+  document.getElementById('edit-modal').classList.add('open');
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').classList.remove('open');
+  document.getElementById('edit-addr-spinner').style.display = 'none';
+  setBtnLoading('edit-submit-icon','edit-submit-label','💾','Enregistrer', false);
+}
+
+async function saveEditCoursier(e) {
+  e.preventDefault();
+  const code    = document.getElementById('edit-modal')._code;
+  const vehicle = document.getElementById('edit-vehicle').value;
+  const adresse = document.getElementById('edit-address').value.trim();
+  const actif   = document.getElementById('edit-active').checked;
+
+  setBtnLoading('edit-submit-icon','edit-submit-label','⏳','Enregistrement…', true);
+  if (adresse) document.getElementById('edit-addr-spinner').style.display = 'block';
+
+  const payload = { vehicle_type: vehicle, is_active: actif };
+  if (adresse) payload.adresse = adresse;
+
+  const res = await fetch(`/coursiers/${code}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  document.getElementById('edit-addr-spinner').style.display = 'none';
+  setBtnLoading('edit-submit-icon','edit-submit-label','💾','Enregistrer', false);
+
+  if (res.ok) {
+    showToast(`✓ ${code} mis à jour`, 'success');
+    closeEditModal();
+    refreshCouriers();
+  } else {
+    const err = await res.json();
+    showToast(`Erreur : ${err.detail}`, 'error');
+  }
+}
+
+// ─── Modal résultat CSV ───
+function openCsvModal(title, statsHtml, theadHtml, tbodyHtml) {
+  document.getElementById('csv-modal-title').textContent = title;
+  document.getElementById('csv-modal-stats').innerHTML   = statsHtml;
+  document.getElementById('csv-modal-thead').innerHTML   = theadHtml;
+  document.getElementById('csv-modal-tbody').innerHTML   = tbodyHtml;
+  document.getElementById('csv-modal').classList.add('open');
+}
+
+function closeCsvModal() {
+  document.getElementById('csv-modal').classList.remove('open');
+}
+
+function statCapsule(value, label, color) {
+  return `<div class="flex flex-col items-center px-5 py-2 rounded-xl border ${color}">
+    <span class="text-2xl font-bold">${value}</span>
+    <span class="text-xs font-medium mt-0.5 opacity-80">${label}</span>
+  </div>`;
 }
 
 let toastTimer;

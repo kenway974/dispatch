@@ -1,0 +1,29 @@
+id,adresse_ramassage,adresse_livraison,zone,volume_type,client_tier,deadline_minutes
+ORD-P01,"12 rue de Rivoli, Paris","Place du Tertre, Montmartre, Paris",Paris,Standard,standard,30
+ORD-P02,"Gare du Nord, Paris","Place de la Bastille, Paris",Paris,Volume,standard,45
+ORD-P03,"Champ de Mars, Paris","Place de l'Opéra, Paris",Paris,Standard,premium,20
+ORD-P04,"Sacré-Cœur, Montmartre, Paris","Place de la République, Paris",Paris,Standard,standard,60
+ORD-P05,"Châtelet, Paris","Place de la Nation, Paris",Paris,Volume,premium,25
+ORD-P06,"Saint-Germain-des-Prés, Paris","Place Pigalle, Paris",Paris,Standard,standard,90
+ORD-P07,"Belleville, Paris","Rue Oberkampf, Paris",Paris,Standard,standard,40
+ORD-P08,"Invalides, Paris","Bibliothèque nationale de France, Paris",Paris,Volume,standard,50
+ORD-P09,"Place de Clichy, Paris","Gare de l'Est, Paris",Paris,Standard,premium,35
+ORD-P10,"Palais Royal, Paris","Place de la Bastille, Paris",Paris,Standard,standard,55
+ORD-PC01,"La Défense, Puteaux","Mairie de Neuilly-sur-Seine",Petite_Couronne,Standard,standard,45
+ORD-PC02,"Stade de France, Saint-Denis","Mairie d'Aubervilliers",Petite_Couronne,Volume,standard,60
+ORD-PC03,"Château de Vincennes","Mairie de Montreuil",Petite_Couronne,Standard,premium,30
+ORD-PC04,"Mairie d'Issy-les-Moulineaux","Mairie de Clamart",Petite_Couronne,Standard,standard,75
+ORD-PC05,"Mairie de Levallois-Perret","Mairie de Clichy",Petite_Couronne,Volume,standard,50
+ORD-PC06,"Mairie de Pantin","Mairie de Bagnolet",Petite_Couronne,Standard,standard,90
+ORD-PC07,"Vitry-sur-Seine","Ivry-sur-Seine",Petite_Couronne,Standard,standard,40
+ORD-PC08,"Asnières-sur-Seine","Colombes",Petite_Couronne,Volume,premium,35
+ORD-PC09,"Créteil Soleil","Maisons-Alfort",Petite_Couronne,Standard,standard,
+ORD-PC10,"Boulogne-Billancourt","Issy-les-Moulineaux",Petite_Couronne,Volume,standard,60
+ORD-GC01,"Château de Versailles","Gare de Rambouillet",Grande_Couronne,Standard,standard,120
+ORD-GC02,"Aéroport d'Orly, Paray-Vieille-Poste","Marché de Rungis",Grande_Couronne,Standard,premium,30
+ORD-GC03,"Massy-Palaiseau","Gare de Palaiseau",Grande_Couronne,Volume,standard,75
+ORD-GC04,"Aéroport Charles de Gaulle, Roissy","Goussainville",Grande_Couronne,Standard,standard,45
+ORD-GC05,"Cergy-Pontoise","Mairie de Pontoise",Grande_Couronne,Standard,standard,
+ORD-GC06,"Évry-Courcouronnes","Corbeil-Essonnes",Grande_Couronne,Volume,standard,90
+ORD-GC07,"Meaux","Lagny-sur-Marne",Grande_Couronne,Standard,premium,60
+ORD-GC08,"Aéroport d'Orly, Paray-Vieille-Poste","Aéroport Charles de Gaulle, Roissy",Grande_Couronne,Voiture,premium,150

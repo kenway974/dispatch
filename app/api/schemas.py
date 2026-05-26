@@ -50,8 +50,8 @@ class CreateOrderRequest(BaseModel):
     }
 
 
-class CreateCourierRequest(BaseModel):
-    """Corps de la requête POST /couriers."""
+class CreateCoursierRequest(BaseModel):
+    """Corps de la requête POST /coursiers."""
     code: str = Field(..., min_length=3, max_length=3, description="Code 3 lettres (ex: KEN)")
     vehicle_type: VehicleType
     lat: float = Field(..., ge=-90,  le=90)
@@ -59,9 +59,18 @@ class CreateCourierRequest(BaseModel):
 
 
 class UpdatePositionRequest(BaseModel):
-    """Corps de la requête PUT /couriers/{code}/position."""
+    """Corps de la requête PUT /coursiers/{code}/position."""
     lat: float = Field(..., ge=-90,  le=90)
     lon: float = Field(..., ge=-180, le=180)
+
+
+class UpdateCoursierRequest(BaseModel):
+    """Corps de la requête PATCH /coursiers/{code} — mise à jour partielle."""
+    vehicle_type: Optional[VehicleType] = Field(default=None, description="Nouveau type de véhicule")
+    adresse: Optional[str]  = Field(default=None, description="Nouvelle adresse (géocodée côté serveur)")
+    lat: Optional[float]    = Field(default=None, ge=-90,  le=90)
+    lon: Optional[float]    = Field(default=None, ge=-180, le=180)
+    is_active: Optional[bool] = Field(default=None, description="Activer ou désactiver le coursier")
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +88,7 @@ class AssignedOrderSchema(BaseModel):
     weight: int
 
 
-class CourierResponse(BaseModel):
+class CoursierResponse(BaseModel):
     """État complet d'un coursier."""
     code: str
     vehicle_type: VehicleType
@@ -105,7 +114,7 @@ class OrderResponse(BaseModel):
     client_tier: ClientTier
     deadline_minutes: Optional[int]
     status: OrderStatus
-    assigned_courier: Optional[str]
+    assigned_coursier: Optional[str]
     created_at: datetime
 
 
@@ -123,6 +132,6 @@ class DispatchResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Statut général du système."""
     status: str
-    courier_count: int
+    coursier_count: int
     order_count: int
-    active_couriers: int
+    coursiers_actifs: int

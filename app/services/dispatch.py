@@ -42,7 +42,7 @@ from app.config import (
     URGENCY_LOAD_PENALTY_MIN_FACTOR,
     VOLUME_WEIGHTS,
 )
-from app.models.courier import Courier, GpsPosition
+from app.models.coursier import Coursier, GpsPosition
 from app.models.enums import ClientTier, OrderStatus, VehicleType, VolumeType, Zone
 from app.models.order import Order
 from app.services.fleet import FleetManager
@@ -74,7 +74,7 @@ class DispatchResult:
 # Éligibilité
 # ---------------------------------------------------------------------------
 
-def is_courier_eligible(courier: Courier, order: Order) -> bool:
+def is_coursier_eligible(coursier: Coursier, order: Order) -> bool:
     """
     Vérifie qu'un coursier peut légalement prendre cette commande.
 
@@ -85,21 +85,21 @@ def is_courier_eligible(courier: Courier, order: Order) -> bool:
     4. La charge actuelle + poids du colis ne doit pas dépasser la capacité max.
     """
     # Règle 1 : actif
-    if not courier.is_active:
+    if not coursier.is_active:
         return False
 
     # Règle 2 : colis Voiture — réservé aux véhicules adaptés
     if order.volume_type == VolumeType.VOITURE:
-        if courier.vehicle_type not in (VehicleType.FOURGON, VehicleType.LONGUE_DISTANCE):
+        if coursier.vehicle_type not in (VehicleType.FOURGON, VehicleType.LONGUE_DISTANCE):
             return False
 
     # Règle 3 : zone
-    if order.zone not in ELIGIBLE_ZONES_BY_VEHICLE[courier.vehicle_type]:
+    if order.zone not in ELIGIBLE_ZONES_BY_VEHICLE[coursier.vehicle_type]:
         return False
 
     # Règle 4 : capacité
     order_weight = VOLUME_WEIGHTS[order.volume_type]
-    if courier.current_load + order_weight > MAX_LOAD_BY_VEHICLE[courier.vehicle_type]:
+    if coursier.current_load + order_weight > MAX_LOAD_BY_VEHICLE[coursier.vehicle_type]:
         return False
 
     return True
@@ -110,7 +110,7 @@ def is_courier_eligible(courier: Courier, order: Order) -> bool:
 # ---------------------------------------------------------------------------
 
 def _vehicle_sub_optimal_penalty(
-    courier: Courier,
+    coursier: Coursier,
     order: Order,
     trip_km: float,
     penalty_factor: float,
@@ -123,12 +123,12 @@ def _vehicle_sub_optimal_penalty(
     il sera quand même sélectionné.
 
     Args:
-        courier        : Coursier évalué.
+        coursier        : Coursier évalué.
         order          : Commande à attribuer.
         trip_km        : Distance ramassage → livraison (pré-calculée).
         penalty_factor : Multiplicateur (réduit à 40 % pour les clients Premium).
     """
-    vtype   = courier.vehicle_type
+    vtype   = coursier.vehicle_type
     penalty = 0.0
 
     # scoot_banlieue_loin affecté en Petite Couronne
@@ -157,7 +157,7 @@ def _vehicle_sub_optimal_penalty(
 # Scoring
 # ---------------------------------------------------------------------------
 
-def score_courier(courier: Courier, order: Order) -> float:
+def score_coursier(coursier: Coursier, order: Order) -> float:
     """
     Calcule le score d'un coursier pour une commande. Plus bas = meilleur.
 
@@ -182,7 +182,7 @@ def score_courier(courier: Courier, order: Order) -> float:
        Désactivé si urgence > URGENCY_GROUPAGE_DISABLE_THRESHOLD.
 
     Args:
-        courier : Coursier éligible à évaluer.
+        coursier : Coursier éligible à évaluer.
         order   : Commande à attribuer.
 
     Returns:
@@ -196,19 +196,19 @@ def score_courier(courier: Courier, order: Order) -> float:
     trip_km        = haversine(pickup_pos, delivery_pos)
 
     # 1. Distance de base : position coursier → point de ramassage
-    base_distance = haversine(courier.position, pickup_pos)
+    base_distance = haversine(coursier.position, pickup_pos)
 
     # 2. Pénalité de charge — allégée linéairement avec l'urgence
     load_factor  = max(URGENCY_LOAD_PENALTY_MIN_FACTOR, 1.0 - urgency)
-    load_penalty = courier.current_load * LOAD_PENALTY_PER_UNIT * load_factor
+    load_penalty = coursier.current_load * LOAD_PENALTY_PER_UNIT * load_factor
 
     # 3. Pénalité véhicule sous-optimal
-    vehicle_penalty = _vehicle_sub_optimal_penalty(courier, order, trip_km, penalty_factor)
+    vehicle_penalty = _vehicle_sub_optimal_penalty(coursier, order, trip_km, penalty_factor)
 
     # 4. Bonus groupage (désactivé si trop urgent)
     groupage_bonus = 0.0
-    if courier.assigned_orders and urgency < URGENCY_GROUPAGE_DISABLE_THRESHOLD:
-        nearest_waypoint_dist = min_distance_to_route(courier, pickup_pos)
+    if coursier.assigned_orders and urgency < URGENCY_GROUPAGE_DISABLE_THRESHOLD:
+        nearest_waypoint_dist = min_distance_to_route(coursier, pickup_pos)
         if nearest_waypoint_dist <= GROUPAGE_PROXIMITY_KM:
             # Réduction proportionnelle à l'inverse de l'urgence
             groupage_bonus = base_distance * GROUPAGE_DISCOUNT_FACTOR * (1.0 - urgency * 2)
@@ -220,23 +220,23 @@ def score_courier(courier: Courier, order: Order) -> float:
 # Sélection du meilleur coursier
 # ---------------------------------------------------------------------------
 
-def get_eligible_couriers(order: Order, fleet: FleetManager) -> List[Courier]:
+def get_coursiers_eligibles(order: Order, fleet: FleetManager) -> List[Coursier]:
     """Retourne tous les coursiers actifs éligibles pour cette commande."""
-    return [c for c in fleet.get_active_couriers() if is_courier_eligible(c, order)]
+    return [c for c in fleet.get_active_couriers() if is_coursier_eligible(c, order)]
 
 
-def find_best_courier(order: Order, fleet: FleetManager) -> Optional[tuple[Courier, float]]:
+def find_best_coursier(order: Order, fleet: FleetManager) -> Optional[tuple[Coursier, float]]:
     """
     Évalue tous les coursiers éligibles et retourne le meilleur.
 
     Returns:
         (meilleur_coursier, score) ou None si aucun éligible.
     """
-    eligible = get_eligible_couriers(order, fleet)
+    eligible = get_coursiers_eligibles(order, fleet)
     if not eligible:
         return None
 
-    scored = [(score_courier(c, order), c) for c in eligible]
+    scored = [(score_coursier(c, order), c) for c in eligible]
     scored.sort(key=lambda x: x[0])
     best_score, best_courier = scored[0]
     return best_courier, best_score
@@ -259,8 +259,8 @@ def dispatch_order(order: Order, fleet: FleetManager) -> DispatchResult:
         order : Commande avec statut PENDING.
         fleet : État courant de la flotte (lu + modifié).
     """
-    eligible_count = len(get_eligible_couriers(order, fleet))
-    result         = find_best_courier(order, fleet)
+    eligible_count = len(get_coursiers_eligibles(order, fleet))
+    result         = find_best_coursier(order, fleet)
 
     if result is None:
         order.status = OrderStatus.UNASSIGNABLE

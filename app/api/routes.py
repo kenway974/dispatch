@@ -18,16 +18,17 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.schemas import (
-    CreateCourierRequest,
+    CreateCoursierRequest,
     CreateOrderRequest,
-    CourierResponse,
+    CoursierResponse,
     DispatchResponse,
     HealthResponse,
     OrderResponse,
     UpdatePositionRequest,
+    UpdateCoursierRequest,
     AssignedOrderSchema,
 )
-from app.models.courier import Courier, GpsPosition
+from app.models.coursier import Coursier, GpsPosition
 from app.models.order import Order, Coordinates
 from app.services.dispatch import dispatch_order
 from app.services.fleet import fleet_manager
@@ -39,18 +40,18 @@ router = APIRouter()
 # Helpers de conversion modèle → schéma de réponse
 # ---------------------------------------------------------------------------
 
-def _courier_to_response(courier: Courier) -> CourierResponse:
-    """Sérialise un Courier interne en CourierResponse."""
-    return CourierResponse(
-        code=courier.code,
-        vehicle_type=courier.vehicle_type,
-        lat=courier.position.lat,
-        lon=courier.position.lon,
-        is_active=courier.is_active,
-        current_load=courier.current_load,
-        max_load=courier.max_load,
-        remaining_capacity=courier.remaining_capacity,
-        order_count=courier.order_count,
+def _coursier_to_response(coursier: Coursier) -> CoursierResponse:
+    """Sérialise un Coursier interne en CoursierResponse."""
+    return CoursierResponse(
+        code=coursier.code,
+        vehicle_type=coursier.vehicle_type,
+        lat=coursier.position.lat,
+        lon=coursier.position.lon,
+        is_active=coursier.is_active,
+        current_load=coursier.current_load,
+        max_load=coursier.max_load,
+        remaining_capacity=coursier.remaining_capacity,
+        order_count=coursier.order_count,
         assigned_orders=[
             AssignedOrderSchema(
                 order_id=o.order_id,
@@ -61,7 +62,7 @@ def _courier_to_response(courier: Courier) -> CourierResponse:
                 volume_type=o.volume_type,
                 weight=o.weight,
             )
-            for o in courier.assigned_orders
+            for o in coursier.assigned_orders
         ],
     )
 
@@ -79,7 +80,7 @@ def _order_to_response(order: Order) -> OrderResponse:
         client_tier=order.client_tier,
         deadline_minutes=order.deadline_minutes,
         status=order.status,
-        assigned_courier=order.assigned_courier,
+        assigned_coursier=order.assigned_coursier,
         created_at=order.created_at,
     )
 
@@ -93,9 +94,9 @@ def health_check() -> HealthResponse:
     """Retourne l'état général du moteur de dispatch."""
     return HealthResponse(
         status="ok",
-        courier_count=fleet_manager.courier_count,
+        coursier_count=fleet_manager.coursier_count,
         order_count=fleet_manager.order_count,
-        active_couriers=len(fleet_manager.get_active_couriers()),
+        coursiers_actifs=len(fleet_manager.get_active_coursiers()),
     )
 
 
@@ -173,76 +174,119 @@ def get_order(order_id: str) -> OrderResponse:
 # ---------------------------------------------------------------------------
 
 @router.post(
-    "/couriers",
-    response_model=CourierResponse,
+    "/coursiers",
+    response_model=CoursierResponse,
     status_code=status.HTTP_201_CREATED,
     tags=["Coursiers"],
     summary="Enregistrer un nouveau coursier dans la flotte",
 )
-def create_courier(payload: CreateCourierRequest) -> CourierResponse:
+def create_coursier(payload: CreateCoursierRequest) -> CoursierResponse:
     """Ajoute un coursier à la flotte avec sa position GPS initiale."""
     try:
-        courier = Courier(
+        coursier = Coursier(
             code=payload.code,
             vehicle_type=payload.vehicle_type,
             position=GpsPosition(lat=payload.lat, lon=payload.lon),
         )
-        fleet_manager.add_courier(courier)
+        fleet_manager.add_coursier(coursier)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
-    return _courier_to_response(courier)
+    return _coursier_to_response(coursier)
 
 
-@router.get("/couriers", response_model=list[CourierResponse], tags=["Coursiers"])
-def list_couriers() -> list[CourierResponse]:
+@router.get("/coursiers", response_model=list[CoursierResponse], tags=["Coursiers"])
+def list_coursiers() -> list[CoursierResponse]:
     """Retourne l'ensemble des coursiers avec leur état temps réel."""
-    return [_courier_to_response(c) for c in fleet_manager.list_couriers()]
+    return [_coursier_to_response(c) for c in fleet_manager.list_coursiers()]
 
 
-@router.get("/couriers/{code}", response_model=CourierResponse, tags=["Coursiers"])
-def get_courier(code: str) -> CourierResponse:
+@router.get("/coursiers/{code}", response_model=CoursierResponse, tags=["Coursiers"])
+def get_coursier(code: str) -> CoursierResponse:
     """Retourne le détail d'un coursier et ses courses en cours."""
-    courier = fleet_manager.get_courier(code)
-    if courier is None:
+    coursier = fleet_manager.get_coursier(code)
+    if coursier is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Coursier '{code.upper()}' introuvable.",
         )
-    return _courier_to_response(courier)
+    return _coursier_to_response(coursier)
 
 
 @router.put(
-    "/couriers/{code}/position",
-    response_model=CourierResponse,
+    "/coursiers/{code}/position",
+    response_model=CoursierResponse,
     tags=["Coursiers"],
     summary="Mettre à jour la position GPS d'un coursier en temps réel",
 )
-def update_position(code: str, payload: UpdatePositionRequest) -> CourierResponse:
+def update_position(code: str, payload: UpdatePositionRequest) -> CoursierResponse:
     """Met à jour la position GPS d'un coursier (appelé par l'app mobile du coursier)."""
     try:
-        courier = fleet_manager.update_courier_position(code, payload.lat, payload.lon)
+        coursier = fleet_manager.update_coursier_position(code, payload.lat, payload.lon)
     except KeyError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    return _courier_to_response(courier)
+    return _coursier_to_response(coursier)
 
 
 @router.put(
-    "/couriers/{code}/active",
-    response_model=CourierResponse,
+    "/coursiers/{code}/active",
+    response_model=CoursierResponse,
     tags=["Coursiers"],
     summary="Activer ou désactiver un coursier",
 )
-def set_courier_active(code: str, active: bool) -> CourierResponse:
+def set_coursier_active(code: str, active: bool) -> CoursierResponse:
     """
     Active ou désactive un coursier (ex: fin de service, panne, pause).
     Un coursier inactif ne reçoit plus aucune attribution.
     """
-    courier = fleet_manager.get_courier(code)
-    if courier is None:
+    coursier = fleet_manager.get_coursier(code)
+    if coursier is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Coursier '{code.upper()}' introuvable.",
         )
-    fleet_manager.set_courier_active(code, active)
-    return _courier_to_response(courier)
+    fleet_manager.set_coursier_active(code, active)
+    return _coursier_to_response(coursier)
+
+
+@router.patch(
+    "/coursiers/{code}",
+    response_model=CoursierResponse,
+    tags=["Coursiers"],
+    summary="Modifier un coursier (véhicule, position, statut)",
+)
+async def update_coursier(code: str, payload: UpdateCoursierRequest) -> CoursierResponse:
+    """
+    Mise à jour partielle d'un coursier.
+    Seuls les champs fournis (non-None) sont modifiés.
+
+    - vehicle_type : change le type de véhicule (et donc la capacité max et les zones)
+    - adresse      : géocode l'adresse via Nominatim et met à jour la position
+    - lat + lon    : met à jour la position GPS directement
+    - is_active    : active ou désactive le coursier
+    """
+    from app.api.routes_ui import geocode_address  # import local pour éviter la circularité
+
+    coursier = fleet_manager.get_coursier(code)
+    if coursier is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Coursier '{code.upper()}' introuvable.",
+        )
+
+    # Géocodage de l'adresse si fournie
+    lat, lon = payload.lat, payload.lon
+    if payload.adresse:
+        try:
+            lat, lon = await geocode_address(payload.adresse)
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+    fleet_manager.update_coursier(
+        code,
+        vehicle_type=payload.vehicle_type,
+        lat=lat,
+        lon=lon,
+        is_active=payload.is_active,
+    )
+    return _coursier_to_response(coursier)

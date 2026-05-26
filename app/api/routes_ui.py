@@ -19,8 +19,8 @@ from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from app.api.schemas import AssignedOrderSchema, CourierResponse, DispatchResponse, OrderResponse
-from app.models.courier import Courier, GpsPosition
+from app.api.schemas import AssignedOrderSchema, CoursierResponse, DispatchResponse, OrderResponse
+from app.models.coursier import Coursier, GpsPosition
 from app.models.enums import ClientTier, VehicleType, Zone, VolumeType
 from app.models.order import Coordinates, Order
 from app.services.dispatch import dispatch_order
@@ -222,12 +222,12 @@ async def upload_fleet(file: UploadFile = File(...)) -> dict:
 
         # Ajout dans la flotte
         try:
-            courier = Courier(
+            coursier = Coursier(
                 code=code,
                 vehicle_type=vehicle_type,
                 position=GpsPosition(lat=lat, lon=lon),
             )
-            fleet_manager.add_courier(courier)
+            fleet_manager.add_coursier(coursier)
             added.append({"code": code, "vehicle_type": str(vehicle_type), "lat": lat, "lon": lon})
         except ValueError:
             skipped.append({"code": code, "reason": "Code déjà enregistré"})

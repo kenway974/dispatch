@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from typing import List
 
-from app.models.courier import GpsPosition, Courier
+from app.models.coursier import GpsPosition, Coursier
 
 
 # Rayon moyen de la Terre en kilomètres
@@ -50,7 +50,7 @@ def haversine(p1: GpsPosition, p2: GpsPosition) -> float:
     return EARTH_RADIUS_KM * c
 
 
-def get_route_waypoints(courier: Courier) -> List[GpsPosition]:
+def get_route_waypoints(coursier: Coursier) -> List[GpsPosition]:
     """
     Retourne tous les waypoints significatifs du trajet actuel d'un coursier.
 
@@ -64,21 +64,21 @@ def get_route_waypoints(courier: Courier) -> List[GpsPosition]:
     il est rentable de l'attribuer à ce coursier.
 
     Args:
-        courier: Coursier dont on extrait les waypoints.
+        coursier: Coursier dont on extrait les waypoints.
 
     Returns:
         Liste ordonnée de positions GPS (position actuelle + ramassages + livraisons).
     """
-    waypoints: List[GpsPosition] = [courier.position]
+    waypoints: List[GpsPosition] = [coursier.position]
 
-    for assigned in courier.assigned_orders:
+    for assigned in coursier.assigned_orders:
         waypoints.append(assigned.pickup_position)
         waypoints.append(assigned.delivery_position)
 
     return waypoints
 
 
-def min_distance_to_route(courier: Courier, target: GpsPosition) -> float:
+def min_distance_to_route(coursier: Coursier, target: GpsPosition) -> float:
     """
     Calcule la distance minimale entre un point cible et tous les waypoints
     du trajet actuel d'un coursier.
@@ -88,14 +88,14 @@ def min_distance_to_route(courier: Courier, target: GpsPosition) -> float:
     est déjà « dans le coin » du nouveau point de ramassage.
 
     Args:
-        courier: Coursier avec ses courses en cours.
+        coursier: Coursier avec ses courses en cours.
         target : Point GPS du nouveau ramassage à évaluer.
 
     Returns:
         Distance minimale en km entre le target et le trajet actuel.
         Retourne float('inf') si le coursier n'a pas de courses.
     """
-    waypoints = get_route_waypoints(courier)
+    waypoints = get_route_waypoints(coursier)
 
     if not waypoints:
         return float("inf")

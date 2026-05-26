@@ -51,7 +51,7 @@ class Order(BaseModel):
     )
 
     status: OrderStatus    = Field(default=OrderStatus.PENDING)
-    assigned_courier: Optional[str] = Field(default=None)
+    assigned_coursier: Optional[str] = Field(default=None)
     created_at: datetime   = Field(default_factory=datetime.now)
 
     # ------------------------------------------------------------------

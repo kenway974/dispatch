@@ -1,5 +1,5 @@
 """
-Modèles de données pour les coursiers (couriers).
+Modèles de données pour les coursiers.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ class AssignedOrder(BaseModel):
         return GpsPosition(lat=self.delivery_lat, lon=self.delivery_lon)
 
 
-class Courier(BaseModel):
+class Coursier(BaseModel):
     """
     Représente un coursier de la flotte avec son état temps réel.
 

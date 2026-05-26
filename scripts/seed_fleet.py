@@ -108,11 +108,11 @@ def seed() -> None:
         # Vérifie que l'API est disponible
         resp = client.get("/health")
         resp.raise_for_status()
-        print(f"API en ligne. Flotte actuelle : {resp.json()['courier_count']} coursier(s).\n")
+        print(f"API en ligne. Flotte actuelle : {resp.json()['coursier_count']} coursier(s).\n")
 
         # Crée chaque coursier
         for data in COURIERS:
-            resp = client.post("/couriers", json=data)
+            resp = client.post("/coursiers", json=data)
             if resp.status_code == 201:
                 c = resp.json()
                 print(f"  ✓ {c['code']:3s} ({c['vehicle_type']:24s}) — ({c['lat']:.4f}, {c['lon']:.4f})")
@@ -124,7 +124,7 @@ def seed() -> None:
         # Résumé final
         resp = client.get("/health")
         h = resp.json()
-        print(f"\nFlotte prête : {h['active_couriers']} coursiers actifs sur {h['courier_count']} enregistrés.")
+        print(f"\nFlotte prête : {h['active_couriers']} coursiers actifs sur {h['coursier_count']} enregistrés.")
 
 
 if __name__ == "__main__":
