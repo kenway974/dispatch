@@ -1,0 +1,690 @@
+<title>Qui dispatche déjà tout seul</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap">
+
+<style>
+  :root {
+    --ground:      #EDF0EE;
+    --surface:     #FFFFFF;
+    --surface-2:   #F5F8F6;
+    --ink:         #141816;
+    --ink-soft:    #515D59;
+    --ink-faint:   #838E8A;
+    --rule:        #D6DCD9;
+    --accent:      #0E5C49;
+    --accent-soft: #DFEDE8;
+    --signal:      #B23F04;
+    --signal-soft: #FAE6D9;
+    --bar:         #93A09C;
+    --bar-mine:    #0E8A66;
+    --on-accent:   #FFFFFF;
+
+    --sans: "Barlow", system-ui, -apple-system, sans-serif;
+    --cond: "Barlow Condensed", "Barlow", system-ui, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0F1312;
+      --surface:     #171D1B;
+      --surface-2:   #1F2725;
+      --ink:         #E7EDEA;
+      --ink-soft:    #A0ACA8;
+      --ink-faint:   #77837F;
+      --rule:        #2A3331;
+      --accent:      #55BC9D;
+      --accent-soft: #16302A;
+      --signal:      #F0904F;
+      --signal-soft: #33211A;
+      --bar:         #78847F;
+      --bar-mine:    #4ECFA2;
+      --on-accent:   #0F1312;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0F1312;
+    --surface:     #171D1B;
+    --surface-2:   #1F2725;
+    --ink:         #E7EDEA;
+    --ink-soft:    #A0ACA8;
+    --ink-faint:   #77837F;
+    --rule:        #2A3331;
+    --accent:      #55BC9D;
+    --accent-soft: #16302A;
+    --signal:      #F0904F;
+    --signal-soft: #33211A;
+    --bar:         #78847F;
+    --bar-mine:    #4ECFA2;
+    --on-accent:   #0F1312;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 18px 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  /* ── En-tête ───────────────────────────────────────────── */
+
+  header {
+    padding-top: 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  h1 {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: clamp(2.3rem, 9vw, 3.4rem);
+    line-height: .94;
+    letter-spacing: -.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .sub {
+    font-size: .95rem;
+    color: var(--ink-soft);
+    margin: 0;
+  }
+
+  .base {
+    font-family: var(--cond);
+    font-size: .82rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    border-top: 1px solid var(--rule);
+    padding-top: 10px;
+  }
+
+  /* ── Titres de section ─────────────────────────────────── */
+
+  .sec { display: flex; flex-direction: column; gap: 14px; }
+
+  h2 {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 1.55rem;
+    line-height: 1.1;
+    letter-spacing: .002em;
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  h2::after {
+    content: "";
+    flex: 1;
+    height: 2px;
+    background: var(--ink);
+    opacity: .13;
+  }
+
+  /* ── Verdict : trois chiffres ──────────────────────────── */
+
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+    gap: 12px;
+  }
+
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 18px 18px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .tile.hot { border-color: var(--signal); background: var(--signal-soft); }
+  .tile.good { border-color: var(--accent); background: var(--accent-soft); }
+
+  .tile .n {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 2.9rem;
+    line-height: .88;
+    letter-spacing: -.015em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tile.hot .n { color: var(--signal); }
+  .tile.good .n { color: var(--accent); }
+
+  .tile .lab {
+    font-size: .88rem;
+    color: var(--ink-soft);
+    line-height: 1.32;
+  }
+
+  /* ── Graphique en barres ───────────────────────────────── */
+
+  .chart { display: flex; flex-direction: column; gap: 11px; }
+
+  .row { display: flex; flex-direction: column; gap: 4px; }
+
+  .row-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .row-name {
+    font-weight: 600;
+    font-size: .93rem;
+  }
+
+  .row-name small {
+    display: block;
+    font-weight: 400;
+    font-size: .78rem;
+    color: var(--ink-faint);
+    line-height: 1.3;
+  }
+
+  .row-val {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 1.32rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .track { height: 13px; background: var(--surface-2); border-radius: 2px; }
+
+  .fill {
+    height: 100%;
+    background: var(--bar);
+    border-radius: 0 4px 4px 0;
+    min-width: 3px;
+  }
+
+  .row.mine .fill { background: var(--bar-mine); }
+  .row.mine .row-val { color: var(--accent); }
+  .row.mine .row-name { color: var(--accent); }
+
+  figcaption {
+    font-size: .8rem;
+    color: var(--ink-faint);
+    line-height: 1.45;
+    margin-top: 4px;
+  }
+
+  /* ── Critères ──────────────────────────────────────────── */
+
+  .bloc {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .bloc.mine { border-color: var(--accent); }
+
+  .bloc-tag {
+    font-family: var(--cond);
+    font-size: .8rem;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .bloc.mine .bloc-tag { color: var(--accent); }
+
+  .crit { display: flex; flex-direction: column; gap: 7px; }
+
+  .crit-lab { font-weight: 600; font-size: .95rem; line-height: 1.3; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .chip {
+    font-family: var(--cond);
+    font-size: .82rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border: 1.5px solid var(--rule);
+    color: var(--ink-faint);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 2px;
+  }
+
+  .chip::before { font-size: .9em; }
+  .chip.no::before   { content: "✕"; }
+  .chip.part::before { content: "~"; }
+  .chip.yes::before  { content: "✓"; }
+
+  .chip.part { color: var(--ink-soft); border-color: var(--ink-faint); }
+  .chip.yes  { color: var(--ink); border-color: var(--ink-soft); }
+
+  .chip.moi {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+  }
+
+  /* ── Objections ────────────────────────────────────────── */
+
+  .obj {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--signal);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .obj-q {
+    font-family: var(--cond);
+    font-size: 1.22rem;
+    font-weight: 600;
+    color: var(--signal);
+    line-height: 1.15;
+  }
+
+  .obj-a { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+
+  .obj-n {
+    font-family: var(--cond);
+    font-weight: 700;
+    font-size: 1.9rem;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .obj-t { font-size: .93rem; color: var(--ink-soft); line-height: 1.35; flex: 1 1 200px; }
+
+  /* ── Pitch ─────────────────────────────────────────────── */
+
+  .pitch { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  @media (min-width: 640px) { .pitch { grid-template-columns: 1fr 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .card.ko { border-top: 4px solid var(--signal); }
+  .card.ok { border-top: 4px solid var(--accent); }
+
+  .card-tag {
+    font-family: var(--cond);
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+
+  .card.ko .card-tag { color: var(--signal); }
+  .card.ok .card-tag { color: var(--accent); }
+
+  .card-say { font-size: 1.02rem; font-weight: 600; line-height: 1.32; }
+  .card-why { font-size: .87rem; color: var(--ink-soft); line-height: 1.4; margin: 0; }
+
+  /* ── Correction ────────────────────────────────────────── */
+
+  .fix {
+    background: var(--signal-soft);
+    border-left: 4px solid var(--signal);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .fix-tag {
+    font-family: var(--cond);
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--signal);
+  }
+
+  .vs { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  @media (min-width: 560px) { .vs { grid-template-columns: 1fr 1fr; } }
+
+  .vs > div {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 12px 14px;
+  }
+
+  .vs .t {
+    font-family: var(--cond);
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 3px;
+  }
+
+  .vs .d { font-size: .92rem; line-height: 1.35; }
+  .vs .eux .d strong { color: var(--signal); }
+  .vs .toi .d strong { color: var(--accent); }
+
+  /* ── Pied ──────────────────────────────────────────────── */
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 18px;
+    font-size: .78rem;
+    color: var(--ink-faint);
+    line-height: 1.6;
+  }
+
+  footer a { color: var(--ink-faint); text-decoration: underline; text-underline-offset: 2px; }
+  footer a:hover { color: var(--accent); }
+
+  summary {
+    font-family: var(--cond);
+    font-size: .82rem;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    cursor: pointer;
+    margin-bottom: 10px;
+  }
+
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <h1>Qui dispatche déjà tout seul</h1>
+    <p class="sub">La concurrence, en chiffres. Pas de pavé.</p>
+    <p class="base">8 coursiers · ≈ 2 600 courses / mois · relevé août 2026</p>
+  </header>
+
+  <section class="sec">
+    <div class="tiles">
+      <div class="tile">
+        <div class="n">10+</div>
+        <div class="lab">produits font déjà l'attribution automatique</div>
+      </div>
+      <div class="tile hot">
+        <div class="n">0</div>
+        <div class="lab">est gratuit à ton volume</div>
+      </div>
+      <div class="tile good">
+        <div class="n">1</div>
+        <div class="lab">propose la comparaison avant adoption — le tien</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Ce que ça coûterait par mois</h2>
+    <figure class="chart" style="margin:0">
+      <div class="row">
+        <div class="row-head">
+          <div class="row-name">Onfleet <small>plan Scale — attribution auto d'équipe</small></div>
+          <div class="row-val">1 349 $</div>
+        </div>
+        <div class="track"><div class="fill" style="width:100%"></div></div>
+      </div>
+      <div class="row">
+        <div class="row-head">
+          <div class="row-name">Onfleet <small>offre d'entrée, sans l'attribution auto</small></div>
+          <div class="row-val">619 $</div>
+        </div>
+        <div class="track"><div class="fill" style="width:45.9%"></div></div>
+      </div>
+      <div class="row">
+        <div class="row-head">
+          <div class="row-name">Tookan <small>99 $ les 700 courses, puis 0,15 $</small></div>
+          <div class="row-val">385 $</div>
+        </div>
+        <div class="track"><div class="fill" style="width:28.5%"></div></div>
+      </div>
+      <div class="row">
+        <div class="row-head">
+          <div class="row-name">Track-POD <small>35 $ par véhicule</small></div>
+          <div class="row-val">280 $</div>
+        </div>
+        <div class="track"><div class="fill" style="width:20.8%"></div></div>
+      </div>
+      <div class="row">
+        <div class="row-head">
+          <div class="row-name">Shipday <small>gratuit jusqu'à 300 courses seulement</small></div>
+          <div class="row-val">250 $</div>
+        </div>
+        <div class="track"><div class="fill" style="width:18.5%"></div></div>
+      </div>
+      <div class="row mine">
+        <div class="row-head">
+          <div class="row-name">Ton moteur <small>hébergement Railway</small></div>
+          <div class="row-val">≈ 5 $</div>
+        </div>
+        <div class="track"><div class="fill" style="width:0.4%"></div></div>
+      </div>
+      <figcaption>
+        GTLYS (France) est sur devis. Urbantz, Bringg, Locus ne publient pas de tarif —
+        dimensionnés pour des flottes d'un autre ordre.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section class="sec">
+    <h2>Ce qu'ils savent faire</h2>
+
+    <div class="bloc">
+      <div class="bloc-tag">Terrain occupé — ils l'ont aussi</div>
+
+      <div class="crit">
+        <div class="crit-lab">Attribuer au plus proche</div>
+        <div class="chips">
+          <span class="chip yes">Onfleet</span><span class="chip yes">Tookan</span>
+          <span class="chip yes">Shipday</span><span class="chip no">GTLYS</span>
+          <span class="chip moi">Toi</span>
+        </div>
+      </div>
+
+      <div class="crit">
+        <div class="crit-lab">Filtrer par type de véhicule</div>
+        <div class="chips">
+          <span class="chip yes">Onfleet</span><span class="chip part">Tookan</span>
+          <span class="chip no">Shipday</span><span class="chip no">GTLYS</span>
+          <span class="chip moi">Toi</span>
+        </div>
+      </div>
+
+      <div class="crit">
+        <div class="crit-lab">Respecter une capacité maximale</div>
+        <div class="chips">
+          <span class="chip yes">Onfleet</span><span class="chip part">Tookan</span>
+          <span class="chip part">Shipday</span><span class="chip no">GTLYS</span>
+          <span class="chip moi">Toi</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bloc mine">
+      <div class="bloc-tag">Terrain libre — personne d'autre</div>
+
+      <div class="crit">
+        <div class="crit-lab">Pénaliser un véhicule non idéal au lieu de l'exclure</div>
+        <div class="chips">
+          <span class="chip no">Onfleet</span><span class="chip no">Tookan</span>
+          <span class="chip no">Shipday</span><span class="chip no">GTLYS</span>
+          <span class="chip moi">Toi</span>
+        </div>
+      </div>
+
+      <div class="crit">
+        <div class="crit-lab">Équilibrer la charge selon l'urgence</div>
+        <div class="chips">
+          <span class="chip no">Onfleet</span><span class="chip part">Tookan</span>
+          <span class="chip no">Shipday</span><span class="chip no">GTLYS</span>
+          <span class="chip moi">Toi</span>
+        </div>
+      </div>
+
+      <div class="crit">
+        <div class="crit-lab">Zones autorisées par permis (50 cm³ ≠ Grande Couronne)</div>
+        <div class="chips">
+          <span class="chip part">Onfleet</span><span class="chip part">Tookan</span>
+          <span class="chip no">Shipday</span><span class="chip no">GTLYS</span>
+          <span class="chip moi">Toi</span>
+        </div>
+      </div>
+
+      <div class="crit">
+        <div class="crit-lab">Prouver l'accord avec le dispatcheur avant d'adopter</div>
+        <div class="chips">
+          <span class="chip no">Onfleet</span><span class="chip no">Tookan</span>
+          <span class="chip no">Shipday</span><span class="chip no">GTLYS</span>
+          <span class="chip moi">Toi</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Je me suis trompé</h2>
+    <div class="fix">
+      <div class="fix-tag">Correction</div>
+      <p style="margin:0;font-size:.95rem">
+        Je t'ai dit qu'aucun ne gérait les types de véhicule. Faux : Onfleet le fait.
+        Mais pas de la même façon.
+      </p>
+      <div class="vs">
+        <div class="eux">
+          <div class="t">Eux</div>
+          <div class="d"><strong>Filtre dur.</strong> Le fourgon est éligible, ou il ne l'est pas.</div>
+        </div>
+        <div class="toi">
+          <div class="t">Toi</div>
+          <div class="d"><strong>Pénalité de 6 km.</strong> Découragé — mais s'il ne reste que lui, il prend.</div>
+        </div>
+      </div>
+      <p style="margin:0;font-size:.87rem;color:var(--ink-soft)">
+        Un filtre dit qui a le droit. Une pénalité dit qui est le plus indiqué, sans bloquer
+        la flotte un jour de sous-effectif.
+      </p>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Les 3 questions de ton patron</h2>
+
+    <div class="obj">
+      <div class="obj-q">« Shipday est gratuit. »</div>
+      <div class="obj-a">
+        <div class="obj-n">300</div>
+        <div class="obj-t">courses/mois maximum sur l'offre gratuite. Vous en faites 2 600 — le plafond saute en 3 jours et demi.</div>
+      </div>
+    </div>
+
+    <div class="obj">
+      <div class="obj-q">« Pourquoi pas Onfleet ? »</div>
+      <div class="obj-a">
+        <div class="obj-n">16 000 $/an</div>
+        <div class="obj-t">pour obtenir « au plus proche ». Ni charge portée, ni groupage, ni client premium. Intégration en plus.</div>
+      </div>
+    </div>
+
+    <div class="obj">
+      <div class="obj-q">« Un prestataire peut le faire. »</div>
+      <div class="obj-a">
+        <div class="obj-n">Oui</div>
+        <div class="obj-t">Onfleet expose son attribution en API. La vraie question : qui prouve que les règles sont les bonnes <em>avant</em> de basculer ?</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Ta phrase d'ouverture</h2>
+    <div class="pitch">
+      <div class="card ko">
+        <div class="card-tag">Terrain perdu</div>
+        <div class="card-say">« J'automatise le dispatch »</div>
+        <p class="card-why">Comparaison directe avec Shipday et Onfleet, qui ont 10 ans d'avance sur l'app coursier, la preuve de livraison, le suivi client et la facturation.</p>
+      </div>
+      <div class="card ok">
+        <div class="card-tag">Terrain tenable</div>
+        <div class="card-say">« Je branche un cerveau sur l'app que vous avez déjà, avec vos règles, et je le prouve avant que vous ne changiez quoi que ce soit »</div>
+        <p class="card-why">Aucun concurrent identifié sur cette combinaison. Et c'est déjà codé.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Le signal du marché</h2>
+    <div class="bloc">
+      <div class="bloc-tag">GTLYS · le logiciel français fait pour ce métier</div>
+      <p style="margin:0;font-size:.95rem;line-height:1.4">
+        Lettres de voiture, preuves de livraison, facturation, app coursier — il fait tout.
+        Et l'attribution d'une course s'y fait <strong>« en un simple clic »</strong>.
+      </p>
+      <p style="margin:0;font-size:.95rem;line-height:1.4;color:var(--accent);font-weight:600">
+        Celui qui connaît le mieux ce métier a tout construit autour de la décision.
+        Sans l'automatiser.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <details>
+      <summary>Sources et réserves</summary>
+      <p style="margin:0 0 10px">
+        « Non documenté » = absent de la documentation publique consultée, pas forcément absent
+        du produit. Sur la comparaison avant adoption je n'ai rien trouvé d'équivalent, mais je
+        ne peux pas prouver une absence. Les tarifs éditeurs bougent : à revérifier avant le rendez-vous.
+      </p>
+      <p style="margin:0">
+        <a href="https://www.upperinc.com/blog/onfleet-pricing/">Onfleet Pricing 2026</a> ·
+        <a href="https://support.onfleet.com/hc/en-us/articles/360023669852-Auto-Assignment">Onfleet Auto Assignment</a> ·
+        <a href="https://docs.onfleet.com/reference/team-auto-dispatch">Onfleet Team Auto-Dispatch API</a> ·
+        <a href="https://checkthat.ai/brands/shipday/pricing">Shipday Pricing 2026</a> ·
+        <a href="https://www.shipday.com/post/best-last-mile-delivery-software-2026-ranking">Shipday — Ranking 2026</a> ·
+        <a href="https://help.jungleworks.com/knowledge-base/auto-allocation-methods-on-tookan-dashboard/">Tookan Auto Allocation</a> ·
+        <a href="https://onro.io/tookan-alternative/">Onro — Tookan alternatives</a> ·
+        <a href="https://deolys.fr/gtlys-logiciel-transport-express/">GTLYS</a> ·
+        <a href="https://www.upperinc.com/blog/automated-dispatch-software/">Upper — Automated Dispatch 2026</a>
+      </p>
+    </details>
+  </footer>
+
+</div>
