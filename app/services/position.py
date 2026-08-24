@@ -40,7 +40,7 @@ from app.config import (
 )
 from app.models.coursier import Coursier, GpsPosition
 from app.models.enums import PositionSource
-from app.services.geo import haversine
+from app.services.geo import Arret, haversine, ordonner_tournee
 
 
 @dataclass
@@ -90,18 +90,21 @@ def _formuler_age(secondes: float) -> str:
 
 def _itineraire_restant(coursier: Coursier) -> list[GpsPosition]:
     """
-    Points que le coursier doit encore atteindre, dans l'ordre de son trajet.
+    Points restants, dans l'ordre où le coursier les desservira réellement.
 
-    Approximation assumée : les courses sont desservies dans l'ordre où elles ont
-    été attribuées, ramassage puis livraison. Le vrai ordre appartient au coursier
-    et nous est inconnu ; sur des trajets urbains de quelques kilomètres, l'écart
-    reste inférieur à l'imprécision qu'on cherche à corriger.
+    L'ordre est reconstruit géographiquement, pas repris de l'ordre
+    d'attribution : projeter un coursier le long d'une tournée que personne ne
+    ferait donnerait une position fausse avec l'air d'être calculée.
     """
-    points: list[GpsPosition] = []
-    for course in coursier.assigned_orders:
-        points.append(course.pickup_position)
-        points.append(course.delivery_position)
-    return points
+    arrets = [
+        Arret(course.pickup_position, course.order_id, est_livraison=False)
+        for course in coursier.assigned_orders
+    ] + [
+        Arret(course.delivery_position, course.order_id, est_livraison=True)
+        for course in coursier.assigned_orders
+    ]
+    ordre, _ = ordonner_tournee(coursier.position, arrets)
+    return [a.position for a in ordre]
 
 
 def _avancer_sur_itineraire(

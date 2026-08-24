@@ -9,6 +9,7 @@ Précision suffisante pour les distances intra-urbaines (< 100 km).
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import List
 
 from app.models.coursier import GpsPosition, Coursier
@@ -119,54 +120,131 @@ def total_route_distance(positions: List[GpsPosition]) -> float:
     return sum(haversine(positions[i], positions[i + 1]) for i in range(len(positions) - 1))
 
 
+@dataclass
+class Arret:
+    """
+    Un point que le coursier doit desservir.
+
+    `course_id` relie un ramassage à sa livraison : c'est la seule contrainte
+    d'ordre du métier. Pour le reste, l'itinéraire suit la géographie — chez
+    Lungta on ne ramasse pas tout avant de livrer, on enchaîne les points dans
+    l'ordre qui a du sens sur la carte.
+    """
+    position: GpsPosition
+    course_id: str
+    est_livraison: bool
+
+
+def _precedence_respectee(sequence: List[Arret]) -> bool:
+    """Vrai si chaque livraison est précédée du ramassage de sa course."""
+    ramasses: set[str] = set()
+    for arret in sequence:
+        if arret.est_livraison:
+            if arret.course_id not in ramasses:
+                return False
+        else:
+            ramasses.add(arret.course_id)
+    return True
+
+
+def _longueur(depart: GpsPosition, sequence: List[Arret]) -> float:
+    """Kilomètres parcourus en desservant `sequence` depuis `depart`."""
+    return total_route_distance([depart] + [a.position for a in sequence])
+
+
+def ordonner_tournee(depart: GpsPosition, arrets: List[Arret]) -> tuple[List[Arret], float]:
+    """
+    Reconstruit l'ordre de passage le plus court, ramassage avant livraison.
+
+    Le métier ne sépare pas les ramassages des livraisons : un coursier peut
+    enchaîner un ramassage, une livraison, cinq ramassages, puis neuf livraisons
+    d'un coup. Ce qui décide, c'est la pertinence géographique du point suivant —
+    pas son type. Supposer l'ordre d'attribution reviendrait à mesurer une
+    tournée que personne ne fait.
+
+    Construction au plus proche voisin parmi les arrêts réalisables, puis
+    amélioration par inversions de segments (2-opt) qui préservent la
+    précédence. Sur les quelques arrêts que porte un coursier, cela donne
+    l'optimum ou s'en approche de très près, en un temps négligeable.
+
+    Returns:
+        (ordre de passage, kilomètres totaux depuis `depart`).
+    """
+    if not arrets:
+        return [], 0.0
+
+    # ── Construction au plus proche voisin ──────────────────────────────────
+    restants = list(arrets)
+    ramasses: set[str] = set()
+    sequence: List[Arret] = []
+    courant = depart
+
+    while restants:
+        realisables = [
+            a for a in restants
+            if not a.est_livraison or a.course_id in ramasses
+        ]
+        if not realisables:
+            # Livraison orpheline (ramassage déjà effectué avant la mesure) :
+            # on la traite comme réalisable plutôt que de bloquer.
+            realisables = restants
+
+        prochain = min(realisables, key=lambda a: haversine(courant, a.position))
+        sequence.append(prochain)
+        restants.remove(prochain)
+        if not prochain.est_livraison:
+            ramasses.add(prochain.course_id)
+        courant = prochain.position
+
+    # ── Amélioration 2-opt sous contrainte de précédence ────────────────────
+    meilleure = _longueur(depart, sequence)
+    ameliore = True
+    while ameliore:
+        ameliore = False
+        for i in range(len(sequence) - 1):
+            for j in range(i + 1, len(sequence)):
+                candidate = sequence[:i] + sequence[i:j + 1][::-1] + sequence[j + 1:]
+                if not _precedence_respectee(candidate):
+                    continue
+                longueur = _longueur(depart, candidate)
+                if longueur < meilleure - 1e-9:
+                    sequence, meilleure, ameliore = candidate, longueur, True
+
+    return sequence, meilleure
+
+
 def cout_insertion(
     depart: GpsPosition,
-    itineraire: List[GpsPosition],
-    ramassage: GpsPosition,
-    livraison: GpsPosition,
+    tournee: List[Arret],
+    nouveaux_arrets: List[Arret],
 ) -> float:
     """
-    Kilomètres supplémentaires imposés par l'insertion d'une course dans une tournée.
+    Kilomètres supplémentaires imposés par l'ajout d'arrêts à une tournée.
 
     C'est la question que le coursier se pose vraiment : « si je prends ça,
     combien ça me rallonge ? » — et non « à quelle distance est le ramassage ? ».
     Une course dont le ramassage est à 200 m mais dont la livraison le fait
-    repartir en arrière lui coûte plus cher qu'une course dont le ramassage est à
-    1 km mais dont la livraison est sur sa route.
+    repartir en arrière lui coûte plus cher qu'une course dont le ramassage est
+    à 1 km mais dont la livraison est sur sa route.
 
-    L'insertion est testée à toutes les positions possibles de la tournée
-    restante (ramassage puis livraison, dans cet ordre), et la meilleure est
-    retenue. Avec quelques arrêts par coursier, l'énumération est immédiate.
-
-    Args:
-        depart     : position actuelle du coursier.
-        itineraire : points qu'il doit encore desservir, dans l'ordre.
-        ramassage  : ramassage de la course évaluée.
-        livraison  : livraison de la course évaluée.
+    Les deux itinéraires — sans puis avec les nouveaux arrêts — sont réordonnés
+    indépendamment : accepter une course peut réorganiser toute la suite du
+    parcours, et c'est bien cette tournée réorganisée qu'il faut comparer.
 
     Returns:
-        Kilomètres ajoutés à la tournée. Comprend le trajet de la course
-        elle-même — retrancher `haversine(ramassage, livraison)` pour obtenir
-        le seul détour.
+        Kilomètres ajoutés. Comprend le trajet propre de la nouvelle course.
     """
-    points = [depart] + list(itineraire)
-    base = total_route_distance(points)
-    n = len(points)
-
-    meilleur = float("inf")
-    for i in range(1, n + 1):            # position du ramassage
-        for j in range(i, n + 1):        # position de la livraison, jamais avant
-            sequence = points[:i] + [ramassage] + points[i:j] + [livraison] + points[j:]
-            meilleur = min(meilleur, total_route_distance(sequence))
-
-    return meilleur - base
+    _, sans = ordonner_tournee(depart, tournee)
+    _, avec = ordonner_tournee(depart, tournee + nouveaux_arrets)
+    return avec - sans
 
 
 def detour_marginal(
     depart: GpsPosition,
-    itineraire: List[GpsPosition],
+    tournee: List[Arret],
     ramassage: GpsPosition,
     livraison: GpsPosition,
+    course_id: str = "NOUVELLE",
 ) -> float:
     """
     Détour net d'une course, une fois retranché son trajet propre.
@@ -180,4 +258,8 @@ def detour_marginal(
         **Négatif** quand la course recouvre une portion de tournée déjà prévue :
         le coursier est alors payé pour l'accepter, au sens du score.
     """
-    return cout_insertion(depart, itineraire, ramassage, livraison) - haversine(ramassage, livraison)
+    nouveaux = [
+        Arret(position=ramassage, course_id=course_id, est_livraison=False),
+        Arret(position=livraison, course_id=course_id, est_livraison=True),
+    ]
+    return cout_insertion(depart, tournee, nouveaux) - haversine(ramassage, livraison)

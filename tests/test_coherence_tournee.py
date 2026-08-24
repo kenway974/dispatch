@@ -16,7 +16,7 @@ from app.models.coursier import AssignedOrder, Coursier, GpsPosition
 from app.models.enums import VehicleType, VolumeType, Zone
 from app.models.order import Coordinates, Order
 from app.services.dispatch import score_coursier
-from app.services.geo import cout_insertion, detour_marginal
+from app.services.geo import Arret, cout_insertion, detour_marginal
 
 
 # ── Points de repère parisiens ────────────────────────────────────────────────
@@ -54,6 +54,15 @@ def coursier(code: str, position: GpsPosition, tournee: list[tuple[GpsPosition, 
     )
 
 
+def arrets(*courses: tuple[GpsPosition, GpsPosition]) -> list[Arret]:
+    """Traduit une suite (ramassage, livraison) en arrêts, sans en figer l'ordre."""
+    resultat: list[Arret] = []
+    for i, (ramassage, livraison) in enumerate(courses):
+        resultat.append(Arret(ramassage, f"C{i}", est_livraison=False))
+        resultat.append(Arret(livraison, f"C{i}", est_livraison=True))
+    return resultat
+
+
 def course(ramassage: GpsPosition, livraison: GpsPosition, zone: Zone = Zone.PARIS) -> Order:
     return Order(
         id="NOUVELLE",
@@ -75,13 +84,28 @@ class TestDirectionDuTrajet:
     """
 
     def test_livraison_dans_le_sens_de_la_marche_est_preferee(self) -> None:
-        vers_neuilly   = detour_marginal(REPUBLIQUE, [CONCORDE], STRASBOURG, NEUILLY)
-        vers_villejuif = detour_marginal(REPUBLIQUE, [CONCORDE], STRASBOURG, VILLEJUIF)
+        vers_neuilly   = detour_marginal(REPUBLIQUE, [Arret(CONCORDE, 'EN_COURS', est_livraison=True)], STRASBOURG, NEUILLY)
+        vers_villejuif = detour_marginal(REPUBLIQUE, [Arret(CONCORDE, 'EN_COURS', est_livraison=True)], STRASBOURG, VILLEJUIF)
         assert vers_neuilly < vers_villejuif
 
-    def test_une_course_dans_le_sens_de_la_marche_peut_raccourcir_la_tournee(self) -> None:
-        """Neuilly prolonge la trajectoire ouest : le détour est négatif."""
-        assert detour_marginal(REPUBLIQUE, [CONCORDE], STRASBOURG, NEUILLY) < 0
+    def test_une_course_dans_le_sens_de_la_marche_est_largement_absorbee(self) -> None:
+        """
+        Neuilly prolonge la trajectoire ouest déjà engagée : l'essentiel du trajet
+        se fond dans la tournée. Le détour doit rester une petite fraction de ce
+        que la course coûterait à un coursier qui partirait exprès.
+        """
+        from app.services.geo import haversine
+        tournee = [Arret(CONCORDE, "EN_COURS", est_livraison=True)]
+        detour  = detour_marginal(REPUBLIQUE, tournee, STRASBOURG, NEUILLY)
+        trajet  = haversine(STRASBOURG, NEUILLY)
+        assert detour < trajet / 2
+
+    def test_une_course_a_contresens_nest_pas_absorbee(self) -> None:
+        """Villejuif repart plein sud : rien ne se fond, le détour explose."""
+        from app.services.geo import haversine
+        tournee = [Arret(CONCORDE, "EN_COURS", est_livraison=True)]
+        detour  = detour_marginal(REPUBLIQUE, tournee, STRASBOURG, VILLEJUIF)
+        assert detour > haversine(STRASBOURG, NEUILLY) / 2
 
     def test_le_ramassage_seul_ne_departagerait_pas(self) -> None:
         """
@@ -93,8 +117,8 @@ class TestDirectionDuTrajet:
             haversine(REPUBLIQUE, STRASBOURG)
         )
         # ... et pourtant les deux courses ne se valent pas
-        assert detour_marginal(REPUBLIQUE, [CONCORDE], STRASBOURG, NEUILLY) != pytest.approx(
-            detour_marginal(REPUBLIQUE, [CONCORDE], STRASBOURG, VILLEJUIF)
+        assert detour_marginal(REPUBLIQUE, [Arret(CONCORDE, 'EN_COURS', est_livraison=True)], STRASBOURG, NEUILLY) != pytest.approx(
+            detour_marginal(REPUBLIQUE, [Arret(CONCORDE, 'EN_COURS', est_livraison=True)], STRASBOURG, VILLEJUIF)
         )
 
 
@@ -137,8 +161,8 @@ class TestRegroupementParDestination:
         vaut moins que zéro : on lui a retranché le trajet propre de la course,
         que le coursier n'a pas à refaire puisqu'il le fait déjà.
         """
-        assert cout_insertion(BUREAU, [BUREAU, BOETIE], BUREAU, BOETIE) == pytest.approx(0.0, abs=0.01)
-        assert detour_marginal(BUREAU, [BUREAU, BOETIE], BUREAU, BOETIE) < 0
+        assert cout_insertion(BUREAU, arrets((BUREAU, BOETIE)), arrets((BUREAU, BOETIE))) == pytest.approx(0.0, abs=0.01)
+        assert detour_marginal(BUREAU, arrets((BUREAU, BOETIE)), BUREAU, BOETIE) < 0
 
     def test_le_regroupement_l_emporte_sur_la_penalite_de_charge(self) -> None:
         """
@@ -167,3 +191,72 @@ class TestCoursierAuRepos:
         loin   = coursier("LOI", NATION)
         nouvelle = course(BUREAU, DOUZIEME)
         assert score_coursier(proche, nouvelle) < score_coursier(loin, nouvelle)
+
+
+class TestProtectionDesUrgences:
+    """
+    Un coursier à qui il reste peu de temps pour honorer une livraison promise
+    ne doit pas être chargé d'autre chose.
+
+    Ce qui compte n'est pas « porte-t-il une urgence ? » mais « lui reste-t-il
+    assez de temps ? ». Beaucoup de marge : il peut prendre un détour. Plus de
+    marge : on le laisse tranquille. Et si la course est sur son axe, elle ne le
+    retarde pas — il la prend au passage, quitte à confier la livraison à un
+    autre.
+    """
+
+    def _coursier_sous_echeance(self, minutes_restantes: float, livraison: GpsPosition):
+        from datetime import datetime, timedelta
+        from app.services.fleet import FleetManager
+
+        fleet = FleetManager()
+        c = coursier("URG", REPUBLIQUE, [(REPUBLIQUE, livraison)])
+        fleet.add_coursier(c)
+        fleet.add_order(Order(
+            id="URG-0",
+            pickup=Coordinates(lat=REPUBLIQUE.lat, lon=REPUBLIQUE.lon),
+            delivery=Coordinates(lat=livraison.lat, lon=livraison.lon),
+            zone=Zone.PARIS,
+            volume_type=VolumeType.STANDARD,
+            deadline_minutes=90,
+            created_at=datetime.now() - timedelta(minutes=90 - minutes_restantes),
+        ))
+        return fleet, c
+
+    def test_peu_de_marge_une_course_detournante_est_penalisee(self) -> None:
+        from app.services.dispatch import score_detail
+        fleet, c = self._coursier_sous_echeance(30, NEUILLY)
+        detail = score_detail(c, course(NATION, VILLEJUIF, zone=Zone.PETITE_COURONNE), fleet)
+        assert detail.penalite_retard > 0
+        assert detail.motif_retard and "URG-0" in detail.motif_retard
+
+    def test_beaucoup_de_marge_aucune_penalite(self) -> None:
+        from app.services.dispatch import score_detail
+        fleet, c = self._coursier_sous_echeance(90, NEUILLY)
+        detail = score_detail(c, course(NATION, VILLEJUIF, zone=Zone.PETITE_COURONNE), fleet)
+        assert detail.penalite_retard == pytest.approx(0.0, abs=0.01)
+
+    def test_seule_la_marge_restante_change_le_score(self) -> None:
+        """Tout est identique par ailleurs : c'est bien le temps disponible qui décide."""
+        from app.services.dispatch import score_detail
+        detournante = course(NATION, VILLEJUIF, zone=Zone.PETITE_COURONNE)
+        fleet_court, c_court = self._coursier_sous_echeance(30, NEUILLY)
+        fleet_long,  c_long  = self._coursier_sous_echeance(90, NEUILLY)
+        assert score_detail(c_court, detournante, fleet_court).total > \
+               score_detail(c_long,  detournante, fleet_long).total
+
+    def test_une_course_sur_son_axe_passe_malgre_la_marge_courte(self) -> None:
+        from app.services.dispatch import score_detail
+        fleet, c = self._coursier_sous_echeance(30, NEUILLY)
+        detail = score_detail(c, course(STRASBOURG, NEUILLY), fleet)
+        assert detail.penalite_retard == pytest.approx(0.0, abs=0.01)
+
+    def test_sans_echeance_aucune_protection_ne_sapplique(self) -> None:
+        from app.services.dispatch import score_detail
+        from app.services.fleet import FleetManager
+
+        fleet = FleetManager()
+        c = coursier("LIB", REPUBLIQUE, [(REPUBLIQUE, NEUILLY)])
+        fleet.add_coursier(c)
+        detail = score_detail(c, course(NATION, VILLEJUIF, zone=Zone.PETITE_COURONNE), fleet)
+        assert detail.penalite_retard == 0.0

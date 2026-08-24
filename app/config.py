@@ -141,3 +141,17 @@ NIVEAUX_URGENCE: list[tuple[str, int]] = [
 
 # Amplitude de service, utilisée pour cadrer la fenêtre de comparaison.
 AMPLITUDE_SERVICE: tuple[str, str] = ("08:30", "19:00")
+
+# ---------------------------------------------------------------------------
+# Protection des courses urgentes déjà embarquées
+# ---------------------------------------------------------------------------
+# Marge de sécurité conservée sur chaque livraison à échéance, en minutes.
+# Un coursier attendu à 15h30 alors qu'il est 14h47 ne doit pas être encombré :
+# le retard induit par une nouvelle course est comparé au temps qu'il lui reste,
+# cette marge déduite.
+MARGE_SECURITE_MINUTES: float = 10.0
+
+# Pénalité, en km équivalents, par minute de retard induite sur une course déjà
+# embarquée qui a une échéance. Volontairement lourde : faire rater une livraison
+# promise coûte plus cher à l'entreprise que quelques kilomètres de détour.
+PENALITE_RETARD_PAR_MINUTE: float = 3.0

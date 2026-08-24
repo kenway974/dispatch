@@ -43,6 +43,7 @@ class CandidatEvalue:
     distance_km: Optional[float]
     penalite_charge: Optional[float]
     penalite_vehicule: Optional[float]
+    penalite_retard: Optional[float]
     detour_km: Optional[float]
     explications: list[str] = field(default_factory=list)
     charge: int = 0
@@ -59,6 +60,7 @@ class CandidatEvalue:
             "distance_km": round(self.distance_km, 2) if self.distance_km is not None else None,
             "penalite_charge": round(self.penalite_charge, 2) if self.penalite_charge is not None else None,
             "penalite_vehicule": round(self.penalite_vehicule, 2) if self.penalite_vehicule is not None else None,
+            "penalite_retard": round(self.penalite_retard, 2) if self.penalite_retard is not None else None,
             "detour_km": round(self.detour_km, 2) if self.detour_km is not None else None,
             "explications": self.explications,
             "charge": self.charge,
@@ -87,12 +89,12 @@ def classer_coursiers(order: Order, fleet: FleetManager) -> list[CandidatEvalue]
                 eligible=False,
                 motif_inegibilite=motif,
                 rang=None, score=None, distance_km=None,
-                penalite_charge=None, penalite_vehicule=None, detour_km=None,
+                penalite_charge=None, penalite_vehicule=None, penalite_retard=None, detour_km=None,
                 charge=coursier.current_load, capacite=coursier.max_load,
             ))
             continue
 
-        detail = score_detail(coursier, order)
+        detail = score_detail(coursier, order, fleet)
         eligibles.append((detail.total, CandidatEvalue(
             code=coursier.code,
             vehicle_type=coursier.vehicle_type.value,
@@ -103,6 +105,7 @@ def classer_coursiers(order: Order, fleet: FleetManager) -> list[CandidatEvalue]
             distance_km=detail.distance_km,
             penalite_charge=detail.penalite_charge,
             penalite_vehicule=detail.penalite_vehicule,
+            penalite_retard=detail.penalite_retard,
             detour_km=detail.detour_km,
             explications=detail.explications(),
             charge=coursier.current_load,

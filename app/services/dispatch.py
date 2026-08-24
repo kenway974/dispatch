@@ -24,6 +24,7 @@ Pénalités véhicule (pour orienter sans bloquer) :
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Optional
 
 from app.config import (
@@ -33,8 +34,11 @@ from app.config import (
     LOAD_PENALTY_PER_UNIT,
     LONG_TRIP_MIN_KM,
     LONGUE_DISTANCE_SHORT_TRIP_PENALTY_KM,
+    MARGE_SECURITE_MINUTES,
+    PENALITE_RETARD_PAR_MINUTE,
     MAX_LOAD_BY_VEHICLE,
     PREMIUM_PENALTY_FACTOR,
+    VITESSE_MOYENNE_KMH,
     SCOOT_LOIN_IN_PC_PENALTY_KM,
     URGENCY_LOAD_PENALTY_MIN_FACTOR,
     VOLUME_WEIGHTS,
@@ -43,7 +47,7 @@ from app.models.coursier import Coursier, GpsPosition
 from app.models.enums import ClientTier, OrderStatus, VehicleType, VolumeType, Zone
 from app.models.order import Order
 from app.services.fleet import FleetManager
-from app.services.geo import detour_marginal, haversine
+from app.services.geo import Arret, detour_marginal, haversine, ordonner_tournee
 from app.services.position import position_effective
 
 
@@ -71,6 +75,20 @@ class DispatchResult:
 # ---------------------------------------------------------------------------
 # Éligibilité
 # ---------------------------------------------------------------------------
+
+def arrets_en_cours(coursier: Coursier) -> List[Arret]:
+    """
+    Arrêts qu'il reste à desservir, sans présumer de leur ordre.
+
+    L'ordre de passage est reconstruit par `ordonner_tournee` : chez Lungta on
+    n'enchaîne pas les ramassages avant les livraisons, on suit la carte.
+    """
+    arrets: List[Arret] = []
+    for course in coursier.assigned_orders:
+        arrets.append(Arret(course.pickup_position, course.order_id, est_livraison=False))
+        arrets.append(Arret(course.delivery_position, course.order_id, est_livraison=True))
+    return arrets
+
 
 def motif_inegibilite(coursier: Coursier, order: Order) -> Optional[str]:
     """
@@ -164,11 +182,102 @@ def _vehicle_sub_optimal_penalty(
     return penalty * penalty_factor
 
 
+def penalite_retard_induit(
+    coursier: Coursier,
+    order: Order,
+    fleet: "FleetManager | None" = None,
+) -> tuple[float, Optional[str]]:
+    """
+    Ce que la nouvelle course ferait perdre aux livraisons déjà promises.
+
+    Un coursier attendu à 15h30 alors qu'il est 14h47 ne doit pas être chargé
+    d'autre chose : sa course urgente passe avant l'optimisation du kilométrage.
+    On compare donc, pour chaque livraison à échéance qu'il transporte, le temps
+    qu'il lui reste au temps qu'il lui faudra une fois la nouvelle course insérée.
+
+    Une course dont le ramassage tombe pile sur sa route ne le retarde
+    pratiquement pas : elle reste acceptable, exactement comme sur le terrain où
+    l'on prend au passage quitte à confier la livraison à un autre.
+
+    Returns:
+        (pénalité en km équivalents, motif lisible si la pénalité est notable).
+    """
+    echeances = _echeances_embarquees(coursier, fleet)
+    if not echeances:
+        return 0.0, None
+
+    position = position_effective(coursier)
+    vitesse  = VITESSE_MOYENNE_KMH[coursier.vehicle_type]
+
+    arrets_actuels = arrets_en_cours(coursier)
+    nouveaux = [
+        Arret(GpsPosition(lat=order.pickup.lat, lon=order.pickup.lon), order.id, est_livraison=False),
+        Arret(GpsPosition(lat=order.delivery.lat, lon=order.delivery.lon), order.id, est_livraison=True),
+    ]
+
+    avant = _minutes_avant_livraison(position, arrets_actuels, vitesse)
+    apres = _minutes_avant_livraison(position, arrets_actuels + nouveaux, vitesse)
+
+    penalite = 0.0
+    plus_serre: Optional[str] = None
+    marge_min = float("inf")
+
+    for order_id, minutes_restantes in echeances.items():
+        if order_id not in avant or order_id not in apres:
+            continue
+        retard = apres[order_id] - avant[order_id]
+        marge  = minutes_restantes - apres[order_id] - MARGE_SECURITE_MINUTES
+        if retard > 0 and marge < 0:
+            # Le retard ne coûte que s'il mord sur une marge déjà insuffisante.
+            depassement = min(retard, -marge)
+            penalite += depassement * PENALITE_RETARD_PAR_MINUTE
+            if marge < marge_min:
+                marge_min = marge
+                plus_serre = order_id
+
+    motif = None
+    if plus_serre is not None:
+        motif = f"mettrait en retard sa livraison {plus_serre}"
+    return penalite, motif
+
+
+def _echeances_embarquees(coursier: Coursier, fleet: "FleetManager | None") -> dict[str, float]:
+    """Minutes restantes avant échéance, pour chaque course embarquée qui en a une."""
+    if fleet is None:
+        return {}
+    restantes: dict[str, float] = {}
+    for embarquee in coursier.assigned_orders:
+        commande = fleet.get_order(embarquee.order_id)
+        if commande is None or commande.deadline_minutes is None:
+            continue
+        ecoule = (datetime.now() - commande.created_at).total_seconds() / 60.0
+        restantes[embarquee.order_id] = commande.deadline_minutes - ecoule
+    return restantes
+
+
+def _minutes_avant_livraison(
+    depart: GpsPosition,
+    arrets: List[Arret],
+    vitesse_kmh: float,
+) -> dict[str, float]:
+    """Minutes écoulées avant d'atteindre chaque livraison, sur l'itinéraire optimal."""
+    ordre, _ = ordonner_tournee(depart, arrets)
+    minutes: dict[str, float] = {}
+    position = depart
+    cumul_km = 0.0
+    for arret in ordre:
+        cumul_km += haversine(position, arret.position)
+        position = arret.position
+        if arret.est_livraison:
+            minutes[arret.course_id] = cumul_km / vitesse_kmh * 60.0
+    return minutes
+
+
 # ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
 
-def score_coursier(coursier: Coursier, order: Order) -> float:
+def score_coursier(coursier: Coursier, order: Order, fleet: "FleetManager | None" = None) -> float:
     """
     Calcule le score d'un coursier pour une commande. Plus bas = meilleur.
 
@@ -199,7 +308,7 @@ def score_coursier(coursier: Coursier, order: Order) -> float:
     Returns:
         Score numérique ≥ 0.01. Plus bas = plus prioritaire.
     """
-    return score_detail(coursier, order).total
+    return score_detail(coursier, order, fleet).total
 
 
 @dataclass
@@ -218,6 +327,8 @@ class ScoreDetail:
     distance_km: float        # coursier → ramassage, à titre indicatif
     penalite_charge: float    # dissuade de surcharger un coursier
     penalite_vehicule: float  # véhicule non idéal pour cette course
+    penalite_retard: float    # retard infligé à une livraison déjà promise
+    motif_retard: Optional[str]
     trajet_km: float          # ramassage → livraison
     urgence: float            # 0.0 → 1.0
 
@@ -233,10 +344,12 @@ class ScoreDetail:
             lignes.append(f"+{self.penalite_charge:.1f} de pénalité de charge")
         if self.penalite_vehicule > 0.01:
             lignes.append(f"+{self.penalite_vehicule:.1f} véhicule non idéal")
+        if self.penalite_retard > 0.01 and self.motif_retard:
+            lignes.append(f"+{self.penalite_retard:.1f} {self.motif_retard}")
         return lignes
 
 
-def score_detail(coursier: Coursier, order: Order) -> ScoreDetail:
+def score_detail(coursier: Coursier, order: Order, fleet: "FleetManager | None" = None) -> ScoreDetail:
     """
     Calcule le score ET sa décomposition (cf. score_coursier pour les composantes).
 
@@ -260,11 +373,7 @@ def score_detail(coursier: Coursier, order: Order) -> ScoreDetail:
     # mais dont la livraison fait repartir en arrière coûte plus cher qu'une
     # course à 1 km dont la livraison est sur la route. Valeur négative quand la
     # course recouvre une portion de trajet déjà prévue.
-    itineraire = []
-    for course in coursier.assigned_orders:
-        itineraire.append(course.pickup_position)
-        itineraire.append(course.delivery_position)
-    detour = detour_marginal(position, itineraire, pickup_pos, delivery_pos)
+    detour = detour_marginal(position, arrets_en_cours(coursier), pickup_pos, delivery_pos, order.id)
 
     # Conservée à titre indicatif : le dispatcheur raisonne d'abord en distance.
     base_distance = haversine(position, pickup_pos)
@@ -276,7 +385,12 @@ def score_detail(coursier: Coursier, order: Order) -> ScoreDetail:
     # 3. Pénalité véhicule sous-optimal
     vehicle_penalty = _vehicle_sub_optimal_penalty(coursier, order, trip_km, penalty_factor)
 
-    total = max(0.01, detour + load_penalty + vehicle_penalty)
+    # 4. Retard infligé aux livraisons déjà promises.
+    # Le kilométrage n'est pas le seul coût : faire rater une livraison annoncée
+    # à 15h30 coûte bien davantage que le détour qui l'a provoquée.
+    retard_penalty, motif_retard = penalite_retard_induit(coursier, order, fleet)
+
+    total = max(0.01, detour + load_penalty + vehicle_penalty + retard_penalty)
 
     return ScoreDetail(
         total=total,
@@ -284,6 +398,8 @@ def score_detail(coursier: Coursier, order: Order) -> ScoreDetail:
         distance_km=base_distance,
         penalite_charge=load_penalty,
         penalite_vehicule=vehicle_penalty,
+        penalite_retard=retard_penalty,
+        motif_retard=motif_retard,
         trajet_km=trip_km,
         urgence=urgency,
     )
@@ -309,7 +425,7 @@ def find_best_coursier(order: Order, fleet: FleetManager) -> Optional[tuple[Cour
     if not eligible:
         return None
 
-    scored = [(score_coursier(c, order), c) for c in eligible]
+    scored = [(score_coursier(c, order, fleet), c) for c in eligible]
     scored.sort(key=lambda x: x[0])
     best_score, best_coursier = scored[0]
     return best_coursier, best_score
