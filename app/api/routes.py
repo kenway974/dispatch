@@ -6,11 +6,12 @@ Routes disponibles :
   POST /orders                        → soumettre une commande (déclenche le dispatch)
   GET  /orders/{order_id}             → détail d'une commande
   GET  /orders                        → liste toutes les commandes
-  POST /couriers                      → enregistrer un nouveau coursier
-  GET  /couriers                      → liste tous les coursiers
-  GET  /couriers/{code}               → détail d'un coursier
-  PUT  /couriers/{code}/position      → mettre à jour la position GPS
-  PUT  /couriers/{code}/active        → activer / désactiver un coursier
+  POST /coursiers                     → enregistrer un nouveau coursier
+  GET  /coursiers                     → liste tous les coursiers
+  GET  /coursiers/{code}              → détail d'un coursier
+  PATCH /coursiers/{code}             → mise à jour partielle d'un coursier
+  PUT  /coursiers/{code}/position     → mettre à jour la position GPS
+  PUT  /coursiers/{code}/active       → activer / désactiver un coursier
 """
 
 from __future__ import annotations

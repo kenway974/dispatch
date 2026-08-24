@@ -15,7 +15,7 @@ class VehicleType(str, Enum):
     # Paris intra-muros uniquement (type historique, peu utilisé dans la flotte actuelle)
 
     SCOOT_BANLIEUE_PROCHE = "scoot_banlieue_proche"
-    # Paris + Petite Couronne (zone principale) + Grande Couronne (avec pénalité)
+    # Paris + Petite Couronne — pas de Grande Couronne
 
     SCOOT_BANLIEUE_LOIN = "scoot_banlieue_loin"
     # Grande Couronne (zone principale) + Petite Couronne (avec légère pénalité)
