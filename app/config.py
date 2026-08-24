@@ -54,11 +54,11 @@ ELIGIBLE_ZONES_BY_VEHICLE: dict[VehicleType, list[Zone]] = {
 # → dissuade d'attribuer à un coursier très chargé
 LOAD_PENALTY_PER_UNIT: float = 0.4
 
-# Seuil de proximité pour déclencher le bonus de groupage (km)
+# Seuil de proximité d'un point de tournée, en km.
+# N'entre plus dans le score depuis le passage au détour marginal — qui mesure
+# directement ce que la course rallonge — mais reste utilisé par les tests
+# géographiques et l'affichage.
 GROUPAGE_PROXIMITY_KM: float = 2.0
-
-# Réduction de score si groupage détecté (0.5 = −50%)
-GROUPAGE_DISCOUNT_FACTOR: float = 0.5
 
 # ---------------------------------------------------------------------------
 # Pénalités de sous-optimalité véhicule
@@ -94,9 +94,6 @@ PREMIUM_PENALTY_FACTOR: float = 0.4
 # 0.1 → à urgence max, la pénalité charge ne représente plus que 10 % de sa valeur
 URGENCY_LOAD_PENALTY_MIN_FACTOR: float = 0.1
 
-# Au-delà de ce score d'urgence, le bonus de groupage est désactivé
-# → on ne cherche plus à optimiser les trajets, on prend le plus proche
-URGENCY_GROUPAGE_DISABLE_THRESHOLD: float = 0.5
 
 # ---------------------------------------------------------------------------
 # Estimation de position (mode pilote)

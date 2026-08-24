@@ -106,7 +106,7 @@ class TestClassement:
         classement = comparaison.classer_coursiers(make_order(), flotte)
         ken = next(c for c in classement if c.code == "KEN")
         assert ken.distance_km is not None
-        assert ken.explications and "ramassage" in ken.explications[0]
+        assert ken.explications and "détour" in ken.explications[0]
 
 
 # ---------------------------------------------------------------------------
@@ -372,11 +372,29 @@ class TestEndpointsPilote:
         _ajouter(client, "KEN")
         assert client.delete("/coursiers/KEN/courses/INCONNUE").status_code == 404
 
-    def test_course_declaree_pese_sur_le_classement(self, client) -> None:
-        """Une charge déclarée doit se voir dans le score : c'est tout l'intérêt de la saisir."""
+    def test_charge_a_l_oppose_penalise(self, client) -> None:
+        """Une charge déclarée hors du trajet doit desservir le coursier."""
         _ajouter(client, "KEN")
         _ajouter(client, "MEH")     # même position, donc départage par la charge
-        client.post("/coursiers/KEN/courses", json={**CORPS_COURSE, "id": "EN-COURS-1"})
+        # Course en cours à l'opposé de la nouvelle : aucun regroupement possible
+        client.post("/coursiers/KEN/courses", json={
+            **CORPS_COURSE, "id": "AILLEURS-1",
+            "pickup_lat": 48.8483, "pickup_lon": 2.3958,      # Nation
+            "delivery_lat": 48.8443, "delivery_lon": 2.4100,  # plus à l'est encore
+        })
 
         data = client.post("/pilote/simulation", json=CORPS_COURSE).json()
-        assert data["choix_app"] == "MEH"    # KEN est chargé, MEH ne l'est pas
+        assert data["choix_app"] == "MEH"    # KEN est chargé ET détourné
+
+    def test_charge_sur_le_meme_trajet_favorise(self, client) -> None:
+        """
+        Le cas inverse, et il compte autant : plusieurs courses vers la même
+        adresse doivent voyager ensemble. Un coursier qui fait déjà ce trajet
+        est le bon choix, même chargé.
+        """
+        _ajouter(client, "KEN")
+        _ajouter(client, "MEH")
+        client.post("/coursiers/KEN/courses", json={**CORPS_COURSE, "id": "MEME-TRAJET-1"})
+
+        data = client.post("/pilote/simulation", json=CORPS_COURSE).json()
+        assert data["choix_app"] == "KEN"    # il y va déjà : la course ne lui coûte rien

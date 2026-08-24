@@ -117,3 +117,67 @@ def total_route_distance(positions: List[GpsPosition]) -> float:
         return 0.0
 
     return sum(haversine(positions[i], positions[i + 1]) for i in range(len(positions) - 1))
+
+
+def cout_insertion(
+    depart: GpsPosition,
+    itineraire: List[GpsPosition],
+    ramassage: GpsPosition,
+    livraison: GpsPosition,
+) -> float:
+    """
+    Kilomètres supplémentaires imposés par l'insertion d'une course dans une tournée.
+
+    C'est la question que le coursier se pose vraiment : « si je prends ça,
+    combien ça me rallonge ? » — et non « à quelle distance est le ramassage ? ».
+    Une course dont le ramassage est à 200 m mais dont la livraison le fait
+    repartir en arrière lui coûte plus cher qu'une course dont le ramassage est à
+    1 km mais dont la livraison est sur sa route.
+
+    L'insertion est testée à toutes les positions possibles de la tournée
+    restante (ramassage puis livraison, dans cet ordre), et la meilleure est
+    retenue. Avec quelques arrêts par coursier, l'énumération est immédiate.
+
+    Args:
+        depart     : position actuelle du coursier.
+        itineraire : points qu'il doit encore desservir, dans l'ordre.
+        ramassage  : ramassage de la course évaluée.
+        livraison  : livraison de la course évaluée.
+
+    Returns:
+        Kilomètres ajoutés à la tournée. Comprend le trajet de la course
+        elle-même — retrancher `haversine(ramassage, livraison)` pour obtenir
+        le seul détour.
+    """
+    points = [depart] + list(itineraire)
+    base = total_route_distance(points)
+    n = len(points)
+
+    meilleur = float("inf")
+    for i in range(1, n + 1):            # position du ramassage
+        for j in range(i, n + 1):        # position de la livraison, jamais avant
+            sequence = points[:i] + [ramassage] + points[i:j] + [livraison] + points[j:]
+            meilleur = min(meilleur, total_route_distance(sequence))
+
+    return meilleur - base
+
+
+def detour_marginal(
+    depart: GpsPosition,
+    itineraire: List[GpsPosition],
+    ramassage: GpsPosition,
+    livraison: GpsPosition,
+) -> float:
+    """
+    Détour net d'une course, une fois retranché son trajet propre.
+
+    Le trajet ramassage → livraison est identique pour tous les coursiers : le
+    laisser dans le score ne départagerait personne. Ce qui distingue, c'est le
+    détour que chacun doit consentir.
+
+    Returns:
+        Détour en km. Zéro pour un coursier au repos pile sur le ramassage.
+        **Négatif** quand la course recouvre une portion de tournée déjà prévue :
+        le coursier est alors payé pour l'accepter, au sens du score.
+    """
+    return cout_insertion(depart, itineraire, ramassage, livraison) - haversine(ramassage, livraison)

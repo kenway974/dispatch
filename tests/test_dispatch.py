@@ -226,13 +226,21 @@ class TestScoring:
         """
         Deux coursiers à la même distance : celui avec plus de charge
         doit avoir un score plus élevé (moins prioritaire).
+
+        Les courses du coursier chargé sont volontairement placées à l'opposé de
+        la nouvelle : sinon le détour marginal les regrouperait et compenserait
+        la pénalité de charge — c'est le comportement voulu, mais ce n'est pas ce
+        que ce test mesure.
         """
         order = make_order("O1", Zone.PARIS, VolumeType.STANDARD, pickup=PARIS_CENTRE)
 
         light = make_coursier("LGT", VehicleType.SCOOT_VILLE, BASTILLE)
         heavy = make_coursier(
             "HVY", VehicleType.SCOOT_VILLE, BASTILLE,
-            assigned=[make_assigned_order(f"O{i}") for i in range(3)],
+            assigned=[
+                make_assigned_order(f"O{i}", pickup=BASTILLE, delivery=BASTILLE)
+                for i in range(3)
+            ],
         )
 
         assert score_coursier(light, order) < score_coursier(heavy, order)

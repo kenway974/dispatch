@@ -30,15 +30,12 @@ from app.config import (
     ELIGIBLE_ZONES_BY_VEHICLE,
     FOURGON_SMALL_TRIP_MAX_KM,
     FOURGON_SMALL_TRIP_PENALTY_KM,
-    GROUPAGE_DISCOUNT_FACTOR,
-    GROUPAGE_PROXIMITY_KM,
     LOAD_PENALTY_PER_UNIT,
     LONG_TRIP_MIN_KM,
     LONGUE_DISTANCE_SHORT_TRIP_PENALTY_KM,
     MAX_LOAD_BY_VEHICLE,
     PREMIUM_PENALTY_FACTOR,
     SCOOT_LOIN_IN_PC_PENALTY_KM,
-    URGENCY_GROUPAGE_DISABLE_THRESHOLD,
     URGENCY_LOAD_PENALTY_MIN_FACTOR,
     VOLUME_WEIGHTS,
 )
@@ -46,7 +43,7 @@ from app.models.coursier import Coursier, GpsPosition
 from app.models.enums import ClientTier, OrderStatus, VehicleType, VolumeType, Zone
 from app.models.order import Order
 from app.services.fleet import FleetManager
-from app.services.geo import haversine, min_distance_to_route
+from app.services.geo import detour_marginal, haversine
 from app.services.position import position_effective
 
 
@@ -217,22 +214,25 @@ class ScoreDetail:
     Tous les postes sont en kilomètres (ou km équivalents pour les pénalités).
     """
     total: float
-    distance_km: float        # coursier → point de ramassage
+    detour_km: float          # kilomètres ajoutés à sa tournée — poste dominant
+    distance_km: float        # coursier → ramassage, à titre indicatif
     penalite_charge: float    # dissuade de surcharger un coursier
     penalite_vehicule: float  # véhicule non idéal pour cette course
-    bonus_groupage: float     # déjà dans le quartier (valeur soustraite)
     trajet_km: float          # ramassage → livraison
     urgence: float            # 0.0 → 1.0
 
     def explications(self) -> list[str]:
         """Postes non nuls, formulés en clair pour l'interface."""
-        lignes = [f"{self.distance_km:.1f} km jusqu'au ramassage"]
+        if self.detour_km < -0.05:
+            lignes = [f"sur sa tournée — raccourcit de {abs(self.detour_km):.1f} km"]
+        elif self.detour_km < self.distance_km - 0.05:
+            lignes = [f"détour de {self.detour_km:.1f} km (ramassage à {self.distance_km:.1f} km)"]
+        else:
+            lignes = [f"détour de {self.detour_km:.1f} km"]
         if self.penalite_charge > 0.01:
             lignes.append(f"+{self.penalite_charge:.1f} de pénalité de charge")
         if self.penalite_vehicule > 0.01:
             lignes.append(f"+{self.penalite_vehicule:.1f} véhicule non idéal")
-        if self.bonus_groupage > 0.01:
-            lignes.append(f"−{self.bonus_groupage:.1f} groupage (déjà dans le secteur)")
         return lignes
 
 
@@ -250,11 +250,24 @@ def score_detail(coursier: Coursier, order: Order) -> ScoreDetail:
     penalty_factor = PREMIUM_PENALTY_FACTOR if order.is_premium else 1.0
     trip_km        = haversine(pickup_pos, delivery_pos)
 
-    # 1. Distance de base : position coursier → point de ramassage
-    # On part de la position EXPLOITABLE (GPS récent, ou estimée depuis le dernier
-    # point connu) : noter un coursier sur une position d'il y a une heure
-    # reviendrait à dispatcher à l'aveugle.
-    base_distance = haversine(position_effective(coursier), pickup_pos)
+    # Position EXPLOITABLE (GPS récent ou estimée) : noter un coursier sur une
+    # position d'il y a une heure reviendrait à dispatcher à l'aveugle.
+    position = position_effective(coursier)
+
+    # 1. Détour marginal — le poste dominant.
+    # Ce n'est pas la distance au ramassage qui décide, c'est ce que la course
+    # rallonge à la tournée en cours. Une course dont le ramassage est à 200 m
+    # mais dont la livraison fait repartir en arrière coûte plus cher qu'une
+    # course à 1 km dont la livraison est sur la route. Valeur négative quand la
+    # course recouvre une portion de trajet déjà prévue.
+    itineraire = []
+    for course in coursier.assigned_orders:
+        itineraire.append(course.pickup_position)
+        itineraire.append(course.delivery_position)
+    detour = detour_marginal(position, itineraire, pickup_pos, delivery_pos)
+
+    # Conservée à titre indicatif : le dispatcheur raisonne d'abord en distance.
+    base_distance = haversine(position, pickup_pos)
 
     # 2. Pénalité de charge — allégée linéairement avec l'urgence
     load_factor  = max(URGENCY_LOAD_PENALTY_MIN_FACTOR, 1.0 - urgency)
@@ -263,22 +276,14 @@ def score_detail(coursier: Coursier, order: Order) -> ScoreDetail:
     # 3. Pénalité véhicule sous-optimal
     vehicle_penalty = _vehicle_sub_optimal_penalty(coursier, order, trip_km, penalty_factor)
 
-    # 4. Bonus groupage (désactivé si trop urgent)
-    groupage_bonus = 0.0
-    if coursier.assigned_orders and urgency < URGENCY_GROUPAGE_DISABLE_THRESHOLD:
-        nearest_waypoint_dist = min_distance_to_route(coursier, pickup_pos)
-        if nearest_waypoint_dist <= GROUPAGE_PROXIMITY_KM:
-            # Réduction proportionnelle à l'inverse de l'urgence
-            groupage_bonus = base_distance * GROUPAGE_DISCOUNT_FACTOR * (1.0 - urgency * 2)
-
-    total = max(0.01, base_distance + load_penalty + vehicle_penalty - groupage_bonus)
+    total = max(0.01, detour + load_penalty + vehicle_penalty)
 
     return ScoreDetail(
         total=total,
+        detour_km=detour,
         distance_km=base_distance,
         penalite_charge=load_penalty,
         penalite_vehicule=vehicle_penalty,
-        bonus_groupage=groupage_bonus,
         trajet_km=trip_km,
         urgence=urgency,
     )
