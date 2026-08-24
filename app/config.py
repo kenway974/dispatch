@@ -119,3 +119,28 @@ POSITION_PERIMEE_MINUTES: float = 20.0
 
 # Une position GPS plus récente que ce seuil est considérée comme temps réel.
 POSITION_TEMPS_REEL_SECONDES: float = 120.0
+
+# ---------------------------------------------------------------------------
+# Paramètres propres à Lungta
+#
+# Renseignés à partir des informations publiques de l'entreprise et des usages
+# du métier. À corriger avec le dispatcheur avant l'essai : ce sont des valeurs
+# de départ, pas des vérités.
+# ---------------------------------------------------------------------------
+
+# Adresse du dépôt — position par défaut d'un coursier nouvellement déclaré.
+# Géocodée côté navigateur au premier usage : aucune coordonnée n'est inventée ici.
+DEPOT_ADRESSE: str = "24 rue des Dames, 75017 Paris"
+
+# Niveaux d'urgence proposés au dispatcheur, en minutes.
+# Le moteur ne connaît que des minutes ; ces paliers sont là pour que la saisie
+# se fasse dans les mots du métier plutôt qu'en tapant un nombre.
+NIVEAUX_URGENCE: list[tuple[str, int]] = [
+    ("Prioritaire", 30),
+    ("Express",     60),
+    ("Urgent",      90),
+    ("Normal",     180),
+]
+
+# Amplitude de service, utilisée pour cadrer la fenêtre de comparaison.
+AMPLITUDE_SERVICE: tuple[str, str] = ("08:30", "19:00")

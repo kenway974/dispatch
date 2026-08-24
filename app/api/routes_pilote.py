@@ -32,6 +32,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.templating import Jinja2Templates
 
+from app.config import DEPOT_ADRESSE, NIVEAUX_URGENCE
 from app.api.routes import _coursier_to_response
 from app.api.schemas import (
     ComparaisonRequest,
@@ -76,8 +77,20 @@ def _construire_order(payload: ComparaisonRequest | CourseExistanteRequest, pref
 
 @router.get("/pilote", include_in_schema=False)
 def page_pilote(request: Request):
-    """Sert l'interface de pilotage utilisée quotidiennement pendant l'essai."""
-    return templates.TemplateResponse(request, "pilote.html")
+    """
+    Sert l'interface de pilotage utilisée quotidiennement pendant l'essai.
+
+    Les paliers d'urgence et l'adresse du dépôt viennent de la configuration :
+    le dispatcheur saisit dans les mots du métier, pas en tapant des minutes.
+    """
+    return templates.TemplateResponse(
+        request,
+        "pilote.html",
+        {
+            "niveaux_urgence": NIVEAUX_URGENCE,
+            "depot_adresse": DEPOT_ADRESSE,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

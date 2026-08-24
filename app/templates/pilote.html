@@ -50,6 +50,10 @@
     .fade-in { animation:fi .25s ease; }
     /* Redéfini localement : masquer un onglet ne doit pas dépendre du chargement du CDN Tailwind */
     .hidden { display:none !important; }
+    .palier { border:1.5px solid #E5E7EB; background:white; border-radius:999px; padding:4px 13px;
+              font-size:.78rem; font-weight:700; color:#6B7280; cursor:pointer; transition:.15s; }
+    .palier:hover { border-color:var(--green-soft); }
+    .palier.on { background:var(--green-deep); border-color:var(--green-deep); color:white; }
     .frais { font-size:.62rem; font-weight:700; margin-top:4px; display:flex; align-items:center; gap:4px; }
     .frais-direct  { color:#166534; }
     .frais-estime  { color:#B45309; }
@@ -188,9 +192,18 @@
               </select>
             </div>
             <div>
-              <label class="lbl">Délai (min)</label>
-              <input class="fld" id="f-deadline" type="number" min="1" placeholder="45">
+              <label class="lbl">Délai</label>
+              <input class="fld" id="f-deadline" type="number" min="1" placeholder="min">
             </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="lbl" style="margin:0 4px 0 0">Urgence</span>
+            {% for libelle, minutes in niveaux_urgence %}
+            <button type="button" class="palier" data-minutes="{{ minutes }}"
+                    onclick="choisirPalier(this, {{ minutes }})">{{ libelle }}</button>
+            {% endfor %}
+            <button type="button" class="palier" data-minutes="" onclick="choisirPalier(this, null)">Sans délai</button>
           </div>
 
           <div class="rounded-xl p-3" style="background:var(--blue-pale); border:1px solid #93C5FD">
@@ -314,7 +327,8 @@
       </div>
       <div>
         <label class="lbl">Position actuelle (adresse)</label>
-        <input class="fld" id="m-adresse" required placeholder="Place de la Bastille, Paris">
+        <input class="fld" id="m-adresse" required value="{{ depot_adresse }}" placeholder="{{ depot_adresse }}">
+        <p class="text-[.68rem] text-gray-400 mt-1">Dépôt par défaut — remplacez par sa position réelle si vous la connaissez</p>
       </div>
       <div class="flex gap-2 justify-end pt-1">
         <button type="button" class="btn btn-ghost" onclick="fermerModal('modal-coursier')">Annuler</button>
@@ -797,6 +811,23 @@ async function geocoderChamp(type) {
 // ═══════════════════════════════════════════════════════════════
 // Comparaison
 // ═══════════════════════════════════════════════════════════════
+/** Les paliers d'urgence remplissent le champ minutes — le moteur ne connaît que des minutes. */
+function choisirPalier(bouton, minutes) {
+  document.querySelectorAll('.palier').forEach(b => b.classList.remove('on'));
+  bouton.classList.add('on');
+  document.getElementById('f-deadline').value = minutes === null ? '' : minutes;
+}
+
+/** Une saisie manuelle de minutes désélectionne le palier : les deux ne doivent pas se contredire. */
+document.addEventListener('DOMContentLoaded', () => {
+  const champ = document.getElementById('f-deadline');
+  if (champ) champ.addEventListener('input', () => {
+    document.querySelectorAll('.palier').forEach(b => {
+      b.classList.toggle('on', b.dataset.minutes === champ.value);
+    });
+  });
+});
+
 async function lancerComparaison(e, journaliser) {
   e.preventDefault();
   if (!coords.pickup || !coords.delivery) {
@@ -849,6 +880,7 @@ async function lancerComparaison(e, journaliser) {
 function reinitialiserFormulaire() {
   ['f-pickup-addr','f-delivery-addr','f-deadline','f-commentaire'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('f-choix').value = '';
+  document.querySelectorAll('.palier').forEach(b => b.classList.remove('on'));
   ['pickup','delivery'].forEach(t => {
     const h = document.getElementById(`hint-${t}`);
     h.className = 'text-[.68rem] text-gray-400 mt-1';
