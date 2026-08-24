@@ -13,9 +13,11 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List, Optional
 
+from datetime import datetime
+
 from app.models.coursier import Coursier, AssignedOrder, GpsPosition
 from app.models.order import Order
-from app.models.enums import OrderStatus
+from app.models.enums import OrderStatus, PositionSource
 
 
 class FleetManager:
@@ -115,14 +117,26 @@ class FleetManager:
         """Retourne uniquement les coursiers actifs (connectés et disponibles)."""
         return [c for c in self._coursiers.values() if c.is_active]
 
-    def update_coursier_position(self, code: str, lat: float, lon: float) -> Coursier:
+    def update_coursier_position(
+        self,
+        code: str,
+        lat: float,
+        lon: float,
+        source: PositionSource = PositionSource.MANUELLE,
+        horodatage: "datetime | None" = None,
+    ) -> Coursier:
         """
-        Met à jour la position GPS d'un coursier en temps réel.
+        Met à jour la position d'un coursier et repart le compteur de fraîcheur.
 
         Args:
-            code : Code 3 lettres du coursier.
-            lat  : Nouvelle latitude.
-            lon  : Nouvelle longitude.
+            code   : Code du coursier.
+            lat    : Nouvelle latitude.
+            lon    : Nouvelle longitude.
+            source : Provenance — saisie du dispatcheur ou GPS du téléphone.
+            horodatage : Instant de la MESURE. À renseigner lors d'un import
+                     depuis un système tiers : dater de « maintenant » une
+                     position relevée il y a dix minutes ferait mentir
+                     l'indicateur de fraîcheur, donc le score qui en découle.
 
         Returns:
             Le coursier mis à jour.
@@ -134,6 +148,8 @@ class FleetManager:
         if coursier is None:
             raise KeyError(f"Coursier '{code}' introuvable.")
         coursier.position = GpsPosition(lat=lat, lon=lon)
+        coursier.position_updated_at = horodatage or datetime.now()
+        coursier.position_source = source
         self._notify()
         return coursier
 
@@ -222,6 +238,8 @@ class FleetManager:
             coursier.vehicle_type = vehicle_type
         if lat is not None and lon is not None:
             coursier.position = GpsPosition(lat=lat, lon=lon)
+            coursier.position_updated_at = datetime.now()
+            coursier.position_source = PositionSource.MANUELLE
         if is_active is not None:
             coursier.is_active = is_active
         self._notify()

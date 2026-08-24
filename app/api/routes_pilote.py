@@ -11,27 +11,41 @@ Routes :
   GET   /pilote/journal/export.csv           → export CSV de l'essai
   POST  /coursiers/{code}/courses            → déclarer une course déjà en portefeuille
   DELETE /coursiers/{code}/courses/{order_id} → course livrée : libère la charge
+  GET   /suivi/{code}                        → page de suivi ouverte par le coursier (secours)
+  POST  /coursiers/{code}/ping               → position remontée par son téléphone
+  POST  /positions/import                    → reprise des positions du système de l'entreprise
+  GET   /pilote/positions                    → positions exploitables + fraîcheur
 """
 
 from __future__ import annotations
 
 import csv
 import io
+import os
+import secrets
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api.routes import _coursier_to_response
-from app.api.schemas import ComparaisonRequest, CourseExistanteRequest, CoursierResponse
-from app.models.enums import OrderStatus
+from app.api.schemas import (
+    ComparaisonRequest,
+    CourseExistanteRequest,
+    CoursierResponse,
+    ImportPositionsRequest,
+    PingPositionRequest,
+)
+from app.models.enums import OrderStatus, PositionSource
 from app.models.order import Coordinates, Order
 from app.services import storage
 from app.services.comparaison import comparer
 from app.services.fleet import fleet_manager
+from app.services.position import estimer_position
 
 router = APIRouter(tags=["Mode pilote"])
 
@@ -222,3 +236,148 @@ def cloturer_course(code: str, order_id: str) -> CoursierResponse:
     if order is not None:
         order.status = OrderStatus.DELIVERED
     return _coursier_to_response(fleet_manager.get_coursier(coursier.code))
+
+
+# ---------------------------------------------------------------------------
+# Suivi de position
+# ---------------------------------------------------------------------------
+
+@router.get("/suivi/{code}", include_in_schema=False)
+def page_suivi(code: str, request: Request):
+    """
+    Page que le coursier ouvre sur son téléphone au début du service.
+
+    Elle envoie sa position toutes les 30 secondes tant qu'elle reste ouverte.
+    Rien à installer : c'est une page web, et le code coursier suffit à
+    l'identifier — le même code que celui qu'il utilise déjà au quotidien.
+    """
+    coursier = fleet_manager.get_coursier(code)
+    return templates.TemplateResponse(
+        request,
+        "suivi.html",
+        {
+            "code": code.upper(),
+            "connu": coursier is not None,
+            "vehicule": coursier.vehicle_type.value if coursier else None,
+        },
+    )
+
+
+@router.post("/coursiers/{code}/ping", tags=["Coursiers"])
+def ping_position(code: str, payload: PingPositionRequest) -> dict:
+    """
+    Enregistre la position remontée par le téléphone d'un coursier.
+
+    Appelé automatiquement par `/suivi/{code}`. Réponse volontairement légère :
+    elle part sur le réseau mobile du coursier, plusieurs fois par minute et par
+    coursier, toute la journée.
+    """
+    coursier = fleet_manager.get_coursier(code)
+    if coursier is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Coursier '{code.upper()}' introuvable. Vérifiez votre code.",
+        )
+
+    fleet_manager.update_coursier_position(
+        coursier.code, payload.lat, payload.lon, source=PositionSource.GPS,
+    )
+    return {
+        "status": "ok",
+        "code": coursier.code,
+        "charge": f"{coursier.current_load}/{coursier.max_load}",
+        "courses": coursier.order_count,
+    }
+
+
+@router.get("/pilote/positions", tags=["Mode pilote"])
+def positions_flotte() -> dict:
+    """
+    Position exploitable de chaque coursier, avec sa fraîcheur.
+
+    Alimente le rafraîchissement de la carte du dispatcheur sans recharger toute
+    la flotte : c'est l'appel le plus fréquent de l'interface.
+    """
+    coursiers = []
+    for coursier in fleet_manager.list_coursiers():
+        estimation = estimer_position(coursier)
+        coursiers.append({
+            "code": coursier.code,
+            "vehicle_type": coursier.vehicle_type.value,
+            "is_active": coursier.is_active,
+            "charge": coursier.current_load,
+            "capacite": coursier.max_load,
+            "courses": coursier.order_count,
+            **estimation.to_dict(),
+        })
+    return {"coursiers": coursiers}
+
+
+# ---------------------------------------------------------------------------
+# Reprise des positions du système de suivi de l'entreprise
+# ---------------------------------------------------------------------------
+
+def _verifier_jeton_import(fourni: Optional[str]) -> None:
+    """
+    Contrôle le jeton partagé protégeant l'import de positions.
+
+    Cet endpoint déplace des coursiers sur la carte du dispatcheur : laissé
+    ouvert, n'importe qui pourrait fausser les recommandations du moteur. Tant
+    que DISPATCH_IMPORT_TOKEN n'est pas configuré, l'import est donc refusé —
+    fermé par défaut plutôt qu'ouvert par oubli.
+    """
+    attendu = os.getenv("DISPATCH_IMPORT_TOKEN", "").strip()
+    if not attendu:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Import de positions désactivé : définissez la variable "
+                "d'environnement DISPATCH_IMPORT_TOKEN pour l'activer."
+            ),
+        )
+    if not fourni or not secrets.compare_digest(fourni, attendu):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Jeton d'import invalide.",
+        )
+
+
+@router.post("/positions/import", tags=["Mode pilote"])
+def importer_positions(
+    payload: ImportPositionsRequest,
+    x_import_token: Optional[str] = Header(default=None, alias="X-Import-Token"),
+) -> dict:
+    """
+    Reprend un lot de positions issues du système de suivi déjà utilisé par l'entreprise.
+
+    C'est la prise unique par laquelle les positions entrent, quelle que soit
+    leur origine — appel direct du système source, script de synchronisation
+    périodique, ou export repris à la main. Le reste de l'application ignore
+    d'où elles viennent.
+
+    Un code inconnu n'est pas une erreur : le système source suit probablement
+    plus de coursiers que la flotte de l'essai. Il est signalé, le lot passe.
+    """
+    _verifier_jeton_import(x_import_token)
+
+    mises_a_jour: list[str] = []
+    inconnus: list[str] = []
+
+    for position in payload.positions:
+        code = position.code.upper()
+        if fleet_manager.get_coursier(code) is None:
+            inconnus.append(code)
+            continue
+        fleet_manager.update_coursier_position(
+            code, position.lat, position.lon,
+            source=PositionSource.IMPORT,
+            horodatage=position.horodatage,
+        )
+        mises_a_jour.append(code)
+
+    return {
+        "status": "ok",
+        "mises_a_jour": len(mises_a_jour),
+        "codes_mis_a_jour": mises_a_jour,
+        "codes_inconnus": inconnus,
+    }

@@ -28,6 +28,7 @@
 |---|---|---|
 | `PORT` | ❌ Non | Injecté automatiquement par Railway — **ne pas définir** |
 | `DISPATCH_DB_PATH` | ⚠️ Pour l'essai | `/data/pilote.db` — chemin de la base SQLite du mode pilote |
+| `DISPATCH_IMPORT_TOKEN` | Si import des positions | Jeton partagé protégeant `POST /positions/import`. Non défini = import refusé |
 
 Les règles de dispatch elles-mêmes restent des constantes Python dans `app/config.py`.
 

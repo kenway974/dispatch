@@ -28,11 +28,13 @@ from app.api.schemas import (
     UpdatePositionRequest,
     UpdateCoursierRequest,
     AssignedOrderSchema,
+    PositionSchema,
 )
 from app.models.coursier import Coursier, GpsPosition
 from app.models.order import Order, Coordinates
 from app.services.dispatch import dispatch_order
 from app.services.fleet import fleet_manager
+from app.services.position import estimer_position
 
 router = APIRouter()
 
@@ -42,8 +44,14 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 def _coursier_to_response(coursier: Coursier) -> CoursierResponse:
-    """Sérialise un Coursier interne en CoursierResponse."""
+    """
+    Sérialise un Coursier interne en CoursierResponse.
+
+    `lat` / `lon` restent le dernier point réellement connu ; le bloc `position`
+    porte la position exploitable (GPS frais ou estimation) et sa fraîcheur.
+    """
     return CoursierResponse(
+        position=PositionSchema(**estimer_position(coursier).to_dict()),
         code=coursier.code,
         vehicle_type=coursier.vehicle_type,
         lat=coursier.position.lat,

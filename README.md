@@ -447,6 +447,60 @@ qui était éligible, à quel score, et pourquoi les autres ont été écartés.
 Sans les courses déjà en portefeuille, le moteur croit tout le monde disponible
 et son équilibrage de charge ne veut plus rien dire. C'est la saisie à ne pas sauter.
 
+### Où sont les coursiers ?
+
+Le moteur note les coursiers sur leur distance au point de ramassage. Cette note
+ne vaut donc rien de plus que la position sur laquelle elle est calculée — et
+personne ne ressaisira huit positions à la main entre deux courses.
+
+Trois sources, par ordre de préférence :
+
+| Source | Mise en œuvre | Fraîcheur |
+|--------|---------------|-----------|
+| **Import** depuis le système de suivi déjà en place | `POST /positions/import` alimenté par `scripts/sync_positions.py` | temps réel |
+| **Estimation à l'estime** | aucune — actif par défaut | recalculée en continu |
+| **Clic sur la carte** | le dispatcheur reporte ce qu'il voit dans l'application de la société | instantanée, manuelle |
+
+**L'import est la voie normale.** L'entreprise dispose déjà d'une application sur
+laquelle les coursiers ouvrent leur shift et qui donne leur position en direct.
+Le moteur n'a pas à refaire ce travail, il a besoin d'y accéder :
+`POST /positions/import` est la prise unique par laquelle ces positions entrent,
+quelle que soit leur provenance. Voir `scripts/sync_positions.py` — tout est
+écrit sauf la fonction qui interroge le système source, à compléter une fois son
+API connue.
+
+**L'estimation prend le relais** dès qu'aucune position récente n'est disponible :
+dernier point connu, temps écoulé, vitesse moyenne du véhicule, suite du trajet
+déjà assigné. C'est le raisonnement que le dispatcheur fait de tête ; il est ici
+simplement écrit. Aucune intégration nécessaire — l'essai peut démarrer sans que
+personne n'ouvre l'accès à quoi que ce soit.
+
+Deux garanties, sans lesquelles ces chiffres ne vaudraient rien :
+
+1. **Une estimation n'est jamais écrite dans l'état.** La position stockée reste
+   le dernier point réellement connu ; l'estimation est recalculée à chaque
+   lecture. Sinon l'erreur s'accumulerait — une estimation d'estimation
+   d'estimation — et au bout d'une heure le moteur raisonnerait sur une fiction.
+
+2. **La fraîcheur est affichée, toujours.** « GPS il y a 20 s » et « estimée
+   depuis sa livraison d'il y a 35 min » ne se valent pas : la seconde mérite un
+   coup de téléphone avant de suivre la recommandation. Chaque coursier porte son
+   badge, et la carte le colore en conséquence (vert temps réel, orange estimé,
+   rouge périmé au-delà de 20 minutes).
+
+Vitesses moyennes et seuils de péremption sont dans `app/config.py` — ce sont des
+ordres de grandeur urbains à ajuster après les premiers jours d'essai.
+
+```bash
+# Activer l'import (fermé par défaut : sans jeton configuré, l'endpoint refuse)
+DISPATCH_IMPORT_TOKEN=<jeton partagé avec le script de synchronisation>
+```
+
+Une page `/suivi/{code}` existe aussi : le coursier l'ouvre sur son téléphone et
+elle envoie sa position toutes les 30 secondes, sans rien installer. Elle fait
+doublon avec l'application de la société et n'est là qu'en secours, si aucun
+accès technique à cette dernière n'est obtenu.
+
 ### Les indicateurs
 
 | Indicateur | Ce qu'il dit |
@@ -471,6 +525,9 @@ une optimisation que l'humain n'avait pas vue.
 | `GET` | `/pilote/journal/export.csv` | Export CSV de l'essai |
 | `POST` | `/coursiers/{code}/courses` | Déclare une course déjà en portefeuille |
 | `DELETE` | `/coursiers/{code}/courses/{id}` | Course livrée — libère la charge |
+| `POST` | `/positions/import` | Reprise des positions du système de l'entreprise (jeton requis) |
+| `GET` | `/pilote/positions` | Positions exploitables et leur fraîcheur |
+| `POST` | `/coursiers/{code}/ping` | Position remontée par un téléphone (secours) |
 
 Exemple :
 

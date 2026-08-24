@@ -4,10 +4,11 @@ Modèles de données pour les coursiers.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.enums import VehicleType, VolumeType
+from app.models.enums import PositionSource, VehicleType, VolumeType
 from app.config import VOLUME_WEIGHTS, MAX_LOAD_BY_VEHICLE
 
 
@@ -53,7 +54,9 @@ class Coursier(BaseModel):
     Attributs clés :
     - code           : identifiant unique 2-4 lettres (ex: KEN, JC)
     - vehicle_type   : détermine les zones et volumes éligibles
-    - position       : position GPS actualisée en temps réel
+    - position       : DERNIÈRE position connue — jamais une estimation.
+                       Les estimations sont recalculées à la lecture, pour ne pas
+                       accumuler l'erreur d'estimation dans l'état stocké.
     - assigned_orders: liste des courses actuellement assignées
     - is_active      : False si le coursier est hors service / déconnecté
     """
@@ -64,6 +67,15 @@ class Coursier(BaseModel):
     position: GpsPosition
     assigned_orders: List[AssignedOrder] = Field(default_factory=list)
     is_active: bool = Field(default=True, description="Coursier disponible et connecté")
+
+    position_updated_at: datetime = Field(
+        default_factory=datetime.now,
+        description="Horodatage de la dernière position connue — sert à mesurer sa fraîcheur",
+    )
+    position_source: PositionSource = Field(
+        default=PositionSource.MANUELLE,
+        description="D'où vient cette position : saisie du dispatcheur ou GPS du coursier",
+    )
 
     @field_validator("code")
     @classmethod

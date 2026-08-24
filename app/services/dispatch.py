@@ -47,6 +47,7 @@ from app.models.enums import ClientTier, OrderStatus, VehicleType, VolumeType, Z
 from app.models.order import Order
 from app.services.fleet import FleetManager
 from app.services.geo import haversine, min_distance_to_route
+from app.services.position import position_effective
 
 
 @dataclass
@@ -250,7 +251,10 @@ def score_detail(coursier: Coursier, order: Order) -> ScoreDetail:
     trip_km        = haversine(pickup_pos, delivery_pos)
 
     # 1. Distance de base : position coursier → point de ramassage
-    base_distance = haversine(coursier.position, pickup_pos)
+    # On part de la position EXPLOITABLE (GPS récent, ou estimée depuis le dernier
+    # point connu) : noter un coursier sur une position d'il y a une heure
+    # reviendrait à dispatcher à l'aveugle.
+    base_distance = haversine(position_effective(coursier), pickup_pos)
 
     # 2. Pénalité de charge — allégée linéairement avec l'urgence
     load_factor  = max(URGENCY_LOAD_PENALTY_MIN_FACTOR, 1.0 - urgency)

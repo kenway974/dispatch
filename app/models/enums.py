@@ -66,3 +66,16 @@ class OrderStatus(str, Enum):
     IN_TRANSIT = "in_transit"     # En cours de livraison
     DELIVERED = "delivered"       # Livrée avec succès
     UNASSIGNABLE = "unassignable" # Aucun coursier éligible trouvé
+
+
+class PositionSource(str, Enum):
+    """
+    Provenance de la dernière position connue d'un coursier.
+
+    Le dispatcheur doit savoir sur quoi le moteur raisonne : une recommandation
+    fondée sur un point GPS de 30 secondes et une autre fondée sur une saisie
+    d'il y a une heure n'ont pas la même valeur.
+    """
+    MANUELLE = "manuelle"   # saisie par le dispatcheur (adresse ou clic sur la carte)
+    GPS      = "gps"        # remontée par le téléphone du coursier
+    IMPORT   = "import"     # reprise du système de suivi déjà en place dans l'entreprise

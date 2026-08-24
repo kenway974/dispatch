@@ -97,3 +97,25 @@ URGENCY_LOAD_PENALTY_MIN_FACTOR: float = 0.1
 # Au-delà de ce score d'urgence, le bonus de groupage est désactivé
 # → on ne cherche plus à optimiser les trajets, on prend le plus proche
 URGENCY_GROUPAGE_DISABLE_THRESHOLD: float = 0.5
+
+# ---------------------------------------------------------------------------
+# Estimation de position (mode pilote)
+# ---------------------------------------------------------------------------
+# Vitesse moyenne réellement tenue, trajets urbains porte-à-porte : elle intègre
+# les arrêts, les feux et le stationnement, elle est donc bien inférieure à la
+# vitesse de pointe du véhicule.
+VITESSE_MOYENNE_KMH: dict[VehicleType, float] = {
+    VehicleType.SCOOT_VILLE:           18.0,   # Paris intra-muros, circulation dense
+    VehicleType.SCOOT_BANLIEUE_PROCHE: 20.0,
+    VehicleType.SCOOT_BANLIEUE_LOIN:   28.0,   # 125cc, voies rapides accessibles
+    VehicleType.LONGUE_DISTANCE:       45.0,   # inter-villes, autoroute
+    VehicleType.FOURGON:               14.0,   # gabarit + stationnement difficile
+}
+
+# Au-delà de ce délai sans signal, la position est signalée comme périmée.
+# Elle reste utilisée — mieux vaut une position vieille que pas de position —
+# mais l'interface le dit clairement au dispatcheur.
+POSITION_PERIMEE_MINUTES: float = 20.0
+
+# Une position GPS plus récente que ce seuil est considérée comme temps réel.
+POSITION_TEMPS_REEL_SECONDES: float = 120.0

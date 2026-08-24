@@ -50,6 +50,16 @@
     .fade-in { animation:fi .25s ease; }
     /* Redéfini localement : masquer un onglet ne doit pas dépendre du chargement du CDN Tailwind */
     .hidden { display:none !important; }
+    .frais { font-size:.62rem; font-weight:700; margin-top:4px; display:flex; align-items:center; gap:4px; }
+    .frais-direct  { color:#166534; }
+    .frais-estime  { color:#B45309; }
+    .frais-perime  { color:#B91C1C; }
+    .point { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+    .point-direct { background:#16A34A; animation:pulse 2s infinite; }
+    .point-estime { background:#F59E0B; }
+    .point-perime { background:#DC2626; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    #map.repositionnement { cursor:crosshair; }
     @keyframes fi { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:none} }
   </style>
 </head>
@@ -214,7 +224,15 @@
       <div id="revelation" class="hidden"></div>
 
       <div class="card p-4">
-        <h2 class="font-bold text-gray-800 mb-2">Carte</h2>
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <h2 class="font-bold text-gray-800">Carte</h2>
+          <span class="text-[.7rem] text-gray-400">Positions rafraîchies automatiquement</span>
+        </div>
+        <div id="bandeau-carte" class="hidden mb-2 rounded-lg px-3 py-2 text-xs font-bold"
+             style="background:var(--blue-pale); border:1px solid #93C5FD; color:var(--blue)">
+          <span id="bandeau-texte"></span>
+          <button class="btn btn-ghost ml-2" style="padding:2px 10px" onclick="annulerRepositionnement()">Annuler</button>
+        </div>
         <div id="map"></div>
         <p class="text-[.7rem] text-gray-400 mt-2">
           🟦 votre choix &nbsp;·&nbsp; 🟩 choix du moteur &nbsp;·&nbsp; ⬤ coursiers &nbsp;·&nbsp; 📦 ramassage / 🏁 livraison
@@ -368,7 +386,29 @@ document.addEventListener('DOMContentLoaded', () => {
   initCarte();
   chargerFlotte();
   chargerJournal();
+
+  // Les positions estimées vieillissent en continu : sans ce rafraîchissement,
+  // le dispatcheur lirait « il y a 2 min » une heure après l'avoir ouvert.
+  setInterval(rafraichirPositions, 30000);
 });
+
+/** Rafraîchit les seules positions, sans recharger toute la flotte. */
+async function rafraichirPositions() {
+  if (document.hidden) return;      // onglet en arrière-plan : inutile de solliciter le serveur
+  try {
+    const r = await fetch('/pilote/positions');
+    const data = await r.json();
+    const parCode = Object.fromEntries(data.coursiers.map(c => [c.code, c]));
+    flotte.forEach(c => {
+      const maj = parCode[c.code];
+      if (maj) c.position = maj;
+    });
+    rendreFlotte();
+    redessinerCoursiers();
+  } catch (err) {
+    // Coupure réseau passagère : la prochaine passe rattrapera.
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Utilitaires
@@ -434,6 +474,9 @@ function initCarte() {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap', maxZoom: 18
     }).addTo(carte);
+    carte.on('click', e => {
+      if (codeARepositionner) repositionner(e.latlng.lat, e.latlng.lng);
+    });
   } catch (err) {
     carte = null;
     document.getElementById('map').innerHTML =
@@ -453,14 +496,44 @@ function pastille(couleur, texte) {
   });
 }
 
+/** Qualité de la position : c'est elle qui dit si la recommandation est fiable. */
+function qualite(position) {
+  if (!position) return 'perime';
+  if (position.perimee) return 'perime';
+  if (position.temps_reel) return 'direct';
+  return position.source === 'estimee' ? 'estime' : 'direct';
+}
+
+function badgeFraicheur(position) {
+  if (!position) return '';
+  const q = qualite(position);
+  return `<div class="frais frais-${q}">
+            <span class="point point-${q}"></span>
+            <span>${echapper(position.explication)}</span>
+          </div>`;
+}
+
 function redessinerCoursiers() {
   if (!carte) return;
   coucheCoursiers.forEach(m => carte.removeLayer(m));
   coucheCoursiers = flotte.map(c => {
-    const couleur = c.is_active ? (c.remaining_capacity <= 0 ? '#EF4444' : '#2D6A4F') : '#9CA3AF';
-    return L.marker([c.lat, c.lon], { icon: pastille(couleur, c.code) })
+    // La position affichée est la position EXPLOITABLE (GPS ou estimée),
+    // celle-là même sur laquelle le moteur calcule son score.
+    const pos = c.position || { lat: c.lat, lon: c.lon };
+    const q = qualite(c.position);
+    const couleur = !c.is_active ? '#9CA3AF'
+                  : c.remaining_capacity <= 0 ? '#EF4444'
+                  : q === 'perime' ? '#B91C1C'
+                  : q === 'estime' ? '#D97706' : '#2D6A4F';
+
+    return L.marker([pos.lat, pos.lon], { icon: pastille(couleur, c.code) })
             .addTo(carte)
-            .bindTooltip(`${c.code} — ${LIBELLE_VEHICULE[c.vehicle_type]} · ${c.current_load}/${c.max_load}`);
+            .bindTooltip(
+              `<b>${c.code}</b> — ${LIBELLE_VEHICULE[c.vehicle_type]}<br>`
+              + `${c.current_load}/${c.max_load} en charge · ${c.order_count} course(s)<br>`
+              + `<i>${c.position ? echapper(c.position.explication) : ''}</i>`,
+              { direction: 'top' }
+            );
   });
 }
 
@@ -532,8 +605,9 @@ function rendreFlotte() {
             <span class="chip ${c.is_active ? 'chip-veh' : 'chip-off'}">${LIBELLE_VEHICULE[c.vehicle_type] || c.vehicle_type}</span>
           </div>
           <div class="flex items-center gap-1 shrink-0">
-            <button class="text-[.65rem] text-gray-500 hover:text-gray-800 px-1" title="Mettre à jour la position"
-                    onclick="deplacerCoursier('${c.code}')">📍</button>
+            <button class="text-[.65rem] text-gray-500 hover:text-gray-800 px-1"
+                    title="Repositionner : cliquez ici puis sur la carte"
+                    onclick="demarrerRepositionnement('${c.code}')">📍</button>
             <button class="text-[.65rem] text-gray-500 hover:text-gray-800 px-1" title="Déclarer une course en cours"
                     onclick="ouvrirModalCourse('${c.code}')">＋</button>
             <button class="text-[.65rem] text-gray-500 hover:text-gray-800 px-1"
@@ -545,6 +619,7 @@ function rendreFlotte() {
           <div class="bar flex-1 ${sature ? 'full' : ''}"><div style="width:${pct}%"></div></div>
           <span class="text-[.68rem] font-bold ${sature ? 'text-red-600' : 'text-gray-500'}">${c.current_load}/${c.max_load}</span>
         </div>
+        ${badgeFraicheur(c.position)}
         ${courses ? `<div class="mt-1.5 pt-1.5 border-t">${courses}</div>` : ''}
       </div>`;
   }).join('');
@@ -587,7 +662,43 @@ async function creerCoursier(e) {
   }
 }
 
-async function deplacerCoursier(code) {
+// Repositionner par un clic sur la carte plutôt qu'en tapant une adresse :
+// le dispatcheur a la vraie position sous les yeux dans l'application de la
+// société ; il doit pouvoir la reporter ici en deux secondes, pas en trente.
+let codeARepositionner = null;
+
+function demarrerRepositionnement(code) {
+  if (!carte) {                     // sans carte, on retombe sur la saisie d'adresse
+    deplacerCoursierParAdresse(code);
+    return;
+  }
+  codeARepositionner = code;
+  document.getElementById('bandeau-texte').textContent =
+    `Cliquez sur la carte à l'endroit où se trouve ${code}`;
+  document.getElementById('bandeau-carte').classList.remove('hidden');
+  document.getElementById('map').classList.add('repositionnement');
+  document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function annulerRepositionnement() {
+  codeARepositionner = null;
+  document.getElementById('bandeau-carte').classList.add('hidden');
+  document.getElementById('map').classList.remove('repositionnement');
+}
+
+async function repositionner(lat, lon) {
+  const code = codeARepositionner;
+  annulerRepositionnement();
+  const r = await fetch(`/coursiers/${code}/position`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lat, lon })
+  });
+  if (!r.ok) { toast('Repositionnement refusé', 'error'); return; }
+  await chargerFlotte();
+  toast(`${code} repositionné`);
+}
+
+async function deplacerCoursierParAdresse(code) {
   const adresse = prompt(`Nouvelle position de ${code} :`);
   if (!adresse) return;
   try {
