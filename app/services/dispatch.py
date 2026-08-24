@@ -74,35 +74,48 @@ class DispatchResult:
 # Éligibilité
 # ---------------------------------------------------------------------------
 
-def is_coursier_eligible(coursier: Coursier, order: Order) -> bool:
+def motif_inegibilite(coursier: Coursier, order: Order) -> Optional[str]:
     """
-    Vérifie qu'un coursier peut légalement prendre cette commande.
+    Retourne la raison pour laquelle un coursier ne peut PAS prendre cette commande,
+    ou None s'il est éligible.
 
     Règles :
     1. Coursier actif.
     2. Colis Voiture → fourgon ou longue_distance uniquement (trop volumineux pour scooter).
     3. La zone de livraison doit être dans les zones autorisées du véhicule.
     4. La charge actuelle + poids du colis ne doit pas dépasser la capacité max.
+
+    Le motif est rédigé en clair : il est affiché tel quel au dispatcheur dans le
+    mode pilote, pour qu'il comprenne pourquoi un coursier a été écarté.
     """
     # Règle 1 : actif
     if not coursier.is_active:
-        return False
+        return "Hors service"
 
     # Règle 2 : colis Voiture — réservé aux véhicules adaptés
     if order.volume_type == VolumeType.VOITURE:
         if coursier.vehicle_type not in (VehicleType.FOURGON, VehicleType.LONGUE_DISTANCE):
-            return False
+            return "Colis Voiture : nécessite un fourgon ou un longue distance"
 
     # Règle 3 : zone
     if order.zone not in ELIGIBLE_ZONES_BY_VEHICLE[coursier.vehicle_type]:
-        return False
+        zones = ", ".join(z.value.replace("_", " ") for z in ELIGIBLE_ZONES_BY_VEHICLE[coursier.vehicle_type])
+        return f"Zone {order.zone.value.replace('_', ' ')} hors périmètre (couvre : {zones})"
 
     # Règle 4 : capacité
     order_weight = VOLUME_WEIGHTS[order.volume_type]
     if coursier.current_load + order_weight > MAX_LOAD_BY_VEHICLE[coursier.vehicle_type]:
-        return False
+        return (
+            f"Capacité insuffisante : {coursier.current_load}/{MAX_LOAD_BY_VEHICLE[coursier.vehicle_type]} "
+            f"utilisées, ce colis en demande {order_weight}"
+        )
 
-    return True
+    return None
+
+
+def is_coursier_eligible(coursier: Coursier, order: Order) -> bool:
+    """Vrai si le coursier peut légalement prendre cette commande (cf. motif_inegibilite)."""
+    return motif_inegibilite(coursier, order) is None
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +201,47 @@ def score_coursier(coursier: Coursier, order: Order) -> float:
     Returns:
         Score numérique ≥ 0.01. Plus bas = plus prioritaire.
     """
+    return score_detail(coursier, order).total
+
+
+@dataclass
+class ScoreDetail:
+    """
+    Décomposition d'un score, poste par poste.
+
+    Le mode pilote affiche cette décomposition au dispatcheur : sans elle, le
+    moteur n'est qu'un nombre à croire sur parole. Avec elle, il devient
+    discutable — donc réglable.
+
+    Tous les postes sont en kilomètres (ou km équivalents pour les pénalités).
+    """
+    total: float
+    distance_km: float        # coursier → point de ramassage
+    penalite_charge: float    # dissuade de surcharger un coursier
+    penalite_vehicule: float  # véhicule non idéal pour cette course
+    bonus_groupage: float     # déjà dans le quartier (valeur soustraite)
+    trajet_km: float          # ramassage → livraison
+    urgence: float            # 0.0 → 1.0
+
+    def explications(self) -> list[str]:
+        """Postes non nuls, formulés en clair pour l'interface."""
+        lignes = [f"{self.distance_km:.1f} km jusqu'au ramassage"]
+        if self.penalite_charge > 0.01:
+            lignes.append(f"+{self.penalite_charge:.1f} de pénalité de charge")
+        if self.penalite_vehicule > 0.01:
+            lignes.append(f"+{self.penalite_vehicule:.1f} véhicule non idéal")
+        if self.bonus_groupage > 0.01:
+            lignes.append(f"−{self.bonus_groupage:.1f} groupage (déjà dans le secteur)")
+        return lignes
+
+
+def score_detail(coursier: Coursier, order: Order) -> ScoreDetail:
+    """
+    Calcule le score ET sa décomposition (cf. score_coursier pour les composantes).
+
+    Returns:
+        ScoreDetail — `total` est le score final, les autres champs sont les postes.
+    """
     pickup_pos   = GpsPosition(lat=order.pickup.lat,   lon=order.pickup.lon)
     delivery_pos = GpsPosition(lat=order.delivery.lat, lon=order.delivery.lon)
 
@@ -213,7 +267,17 @@ def score_coursier(coursier: Coursier, order: Order) -> float:
             # Réduction proportionnelle à l'inverse de l'urgence
             groupage_bonus = base_distance * GROUPAGE_DISCOUNT_FACTOR * (1.0 - urgency * 2)
 
-    return max(0.01, base_distance + load_penalty + vehicle_penalty - groupage_bonus)
+    total = max(0.01, base_distance + load_penalty + vehicle_penalty - groupage_bonus)
+
+    return ScoreDetail(
+        total=total,
+        distance_km=base_distance,
+        penalite_charge=load_penalty,
+        penalite_vehicule=vehicle_penalty,
+        bonus_groupage=groupage_bonus,
+        trajet_km=trip_km,
+        urgence=urgency,
+    )
 
 
 # ---------------------------------------------------------------------------

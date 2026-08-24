@@ -11,7 +11,7 @@ L'interface publique reste identique pour faciliter cette migration.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from app.models.coursier import Coursier, AssignedOrder, GpsPosition
 from app.models.order import Order
@@ -33,6 +33,59 @@ class FleetManager:
         self._coursiers: Dict[str, Coursier] = {}
         # Dictionnaire order_id → Order
         self._orders: Dict[str, Order] = {}
+        # Callback appelé après chaque mutation (persistance ; None = pas de sauvegarde)
+        self._on_change: Optional[Callable[["FleetManager"], None]] = None
+
+    # ------------------------------------------------------------------
+    # Persistance
+    # ------------------------------------------------------------------
+
+    def set_on_change(self, callback: Optional[Callable[["FleetManager"], None]]) -> None:
+        """
+        Enregistre un callback déclenché après chaque mutation de l'état.
+
+        Utilisé pour persister la flotte : sans ça, un redémarrage du serveur
+        efface les coursiers et leurs courses en cours.
+        """
+        self._on_change = callback
+
+    def _notify(self) -> None:
+        """Signale une mutation au callback de persistance, sans jamais faire échouer l'appelant."""
+        if self._on_change is None:
+            return
+        try:
+            self._on_change(self)
+        except Exception:  # noqa: BLE001 — une panne de sauvegarde ne doit pas bloquer un dispatch
+            pass
+
+    def to_snapshot(self) -> dict:
+        """Sérialise l'état complet (coursiers + commandes) en structures JSON-compatibles."""
+        return {
+            "coursiers": [c.model_dump(mode="json") for c in self._coursiers.values()],
+            "orders": [o.model_dump(mode="json") for o in self._orders.values()],
+        }
+
+    def restore(self, snapshot: dict) -> None:
+        """
+        Restaure un état sérialisé par `to_snapshot`.
+
+        Les entrées corrompues ou issues d'un ancien schéma sont ignorées
+        individuellement : mieux vaut repartir avec 11 coursiers sur 12 qu'avec zéro.
+        """
+        self._coursiers.clear()
+        self._orders.clear()
+        for brut in snapshot.get("coursiers", []):
+            try:
+                coursier = Coursier(**brut)
+            except Exception:  # noqa: BLE001
+                continue
+            self._coursiers[coursier.code] = coursier
+        for brut in snapshot.get("orders", []):
+            try:
+                order = Order(**brut)
+            except Exception:  # noqa: BLE001
+                continue
+            self._orders[order.id] = order
 
     # ------------------------------------------------------------------
     # Gestion des coursiers
@@ -48,6 +101,7 @@ class FleetManager:
         if coursier.code in self._coursiers:
             raise ValueError(f"Coursier '{coursier.code}' déjà enregistré.")
         self._coursiers[coursier.code] = coursier
+        self._notify()
 
     def get_coursier(self, code: str) -> Optional[Coursier]:
         """Retourne le coursier par son code 3 lettres, ou None."""
@@ -80,6 +134,7 @@ class FleetManager:
         if coursier is None:
             raise KeyError(f"Coursier '{code}' introuvable.")
         coursier.position = GpsPosition(lat=lat, lon=lon)
+        self._notify()
         return coursier
 
     def assign_order_to_coursier(self, order: Order, coursier_code: str) -> None:
@@ -113,6 +168,7 @@ class FleetManager:
         # Met à jour la commande
         order.status = OrderStatus.ASSIGNED
         order.assigned_coursier = coursier_code.upper()
+        self._notify()
 
     def remove_order_from_coursier(self, order_id: str, coursier_code: str) -> None:
         """
@@ -126,12 +182,14 @@ class FleetManager:
         if coursier is None:
             return
         coursier.assigned_orders = [o for o in coursier.assigned_orders if o.order_id != order_id]
+        self._notify()
 
     def set_coursier_active(self, code: str, active: bool) -> None:
         """Active ou désactive un coursier (ex: fin de service, panne)."""
         coursier = self._coursiers.get(code.upper())
         if coursier:
             coursier.is_active = active
+            self._notify()
 
     def update_coursier(
         self,
@@ -166,6 +224,7 @@ class FleetManager:
             coursier.position = GpsPosition(lat=lat, lon=lon)
         if is_active is not None:
             coursier.is_active = is_active
+        self._notify()
         return coursier
 
     # ------------------------------------------------------------------
@@ -175,6 +234,7 @@ class FleetManager:
     def add_order(self, order: Order) -> None:
         """Enregistre une nouvelle commande dans le store."""
         self._orders[order.id] = order
+        self._notify()
 
     def get_order(self, order_id: str) -> Optional[Order]:
         """Retourne une commande par son ID, ou None."""
@@ -192,6 +252,7 @@ class FleetManager:
         """Vide complètement le store — coursiers ET commandes. Utile pour la démo."""
         self._coursiers.clear()
         self._orders.clear()
+        self._notify()
 
     @property
     def coursier_count(self) -> int:

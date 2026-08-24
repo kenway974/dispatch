@@ -12,3 +12,7 @@ build/
 .mypy_cache/
 .ruff_cache/
 *.log
+
+# Base SQLite du mode pilote (locale)
+data/
+*.db

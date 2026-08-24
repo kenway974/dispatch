@@ -135,3 +135,53 @@ class HealthResponse(BaseModel):
     coursier_count: int
     order_count: int
     coursiers_actifs: int
+
+
+# ---------------------------------------------------------------------------
+# Schémas du mode pilote (comparaison manuel / automatique)
+# ---------------------------------------------------------------------------
+
+class ComparaisonRequest(BaseModel):
+    """
+    Corps de POST /pilote/comparaison — une course + le choix du dispatcheur.
+
+    `choix_manuel` est saisi AVANT la révélation du choix de l'application :
+    c'est ce qui garantit que l'essai mesure quelque chose.
+    """
+    id: Optional[str] = Field(default=None, description="Référence de la course (auto-générée si absente)")
+    pickup_lat: float   = Field(..., ge=-90,  le=90)
+    pickup_lon: float   = Field(..., ge=-180, le=180)
+    delivery_lat: float = Field(..., ge=-90,  le=90)
+    delivery_lon: float = Field(..., ge=-180, le=180)
+    zone: Zone
+    volume_type: VolumeType
+    client_tier: ClientTier = Field(default=ClientTier.STANDARD)
+    deadline_minutes: Optional[int] = Field(default=None, ge=1)
+
+    choix_manuel: Optional[str] = Field(
+        default=None, min_length=2, max_length=4,
+        description="Code du coursier réellement choisi par le dispatcheur",
+    )
+    commentaire: Optional[str] = Field(
+        default=None, max_length=500,
+        description="Note libre : pourquoi ce choix (contexte que le moteur ne voit pas)",
+    )
+    pickup_adresse: Optional[str]   = Field(default=None, max_length=300)
+    delivery_adresse: Optional[str] = Field(default=None, max_length=300)
+
+
+class CourseExistanteRequest(BaseModel):
+    """
+    Corps de POST /coursiers/{code}/courses — déclarer une course déjà en cours.
+
+    Sert au début de service : le dispatcheur renseigne ce que chacun a déjà
+    en portefeuille, sinon le moteur raisonne sur une flotte vide et son
+    équilibrage de charge n'a aucun sens.
+    """
+    id: Optional[str] = Field(default=None, description="Référence (auto-générée si absente)")
+    pickup_lat: float   = Field(..., ge=-90,  le=90)
+    pickup_lon: float   = Field(..., ge=-180, le=180)
+    delivery_lat: float = Field(..., ge=-90,  le=90)
+    delivery_lon: float = Field(..., ge=-180, le=180)
+    zone: Zone
+    volume_type: VolumeType = Field(default=VolumeType.STANDARD)

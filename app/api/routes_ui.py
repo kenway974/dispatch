@@ -204,8 +204,8 @@ async def upload_fleet(file: UploadFile = File(...)) -> dict:
         lon_raw = row.get("lon", "").strip()
 
         try:
-            if not code or len(code) != 3:
-                raise ValueError(f"Code invalide : '{code}' (doit faire 3 lettres)")
+            if not code or not (2 <= len(code) <= 4):
+                raise ValueError(f"Code invalide : '{code}' (doit faire 2 à 4 caractères)")
             vehicle_type = VehicleType(vehicle_type_raw)
 
             # Résolution des coordonnées : adresse prioritaire sur lat/lon
