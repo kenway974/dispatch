@@ -1,7 +1,16 @@
 # Demande d'accès aux positions des coursiers
 
-Document à transmettre au responsable, qui le relaiera au prestataire ayant
-développé l'application de la société.
+Document à transmettre au responsable, qui le relaiera à **Sigmasoft**, éditeur
+de la suite **Quick** et de l'application coursier **QuickDriver** utilisée dans
+l'entreprise.
+
+Deux éléments jouent en faveur de la demande, à rappeler au moment de la poser :
+
+- QuickDriver remonte déjà les positions en temps réel au service exploitation.
+  La donnée existe et circule ; il ne s'agit pas de la produire, seulement d'y accéder.
+- La suite Quick annonce un **import/export EDI automatique**. Un mécanisme
+  d'échange est donc déjà prévu au catalogue de l'éditeur — la demande n'est pas
+  un développement exotique.
 
 **L'essai ne dépend pas de cette demande.** Le moteur sait estimer les positions
 sans aucune intégration (dernier point connu, temps écoulé, tournée en cours).
@@ -28,7 +37,7 @@ celui qui la reçoit.
 
 ---
 
-## 2. Pour le prestataire — fiche technique
+## 2. Pour Sigmasoft — fiche technique
 
 ### Ce qui est demandé
 
@@ -79,7 +88,8 @@ ouvert leur shift, uniquement pendant qu'il est ouvert.
 
 ### Solutions de repli, par ordre d'effort décroissant
 
-Si un point d'accès dédié est trop lourd à mettre en place :
+Si un point d'accès dédié est trop lourd à mettre en place — et **l'export EDI
+déjà proposé par Quick est sans doute le chemin le plus court** :
 
 1. **Un export périodique** — un fichier CSV ou JSON déposé toutes les minutes
    sur un espace accessible (S3, FTP, URL statique). Même contenu, même usage.
