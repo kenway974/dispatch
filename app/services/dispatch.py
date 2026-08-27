@@ -128,7 +128,7 @@ def motif_inegibilite(coursier: Coursier, order: Order) -> Optional[str]:
     # Règle 2 : colis Voiture — réservé aux véhicules adaptés
     if order.volume_type == VolumeType.VOITURE:
         if coursier.vehicle_type not in (VehicleType.FOURGON, VehicleType.VOITURE):
-            return "Colis Voiture : nécessite un fourgon ou un longue distance"
+            return "Colis trop encombrant pour un deux-roues : voiture ou fourgon"
 
     # Règle 3 : zone, élargie par l'autonomie du coursier.
     # La Grande Couronne n'est pas fermée aux scooters : elle est ouverte à ceux

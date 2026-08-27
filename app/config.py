@@ -106,10 +106,10 @@ URGENCY_LOAD_PENALTY_MIN_FACTOR: float = 0.1
 # les arrêts, les feux et le stationnement, elle est donc bien inférieure à la
 # vitesse de pointe du véhicule.
 VITESSE_MOYENNE_KMH: dict[VehicleType, float] = {
-    VehicleType.SCOOT_50:  18.0,   # bridé, circulation dense
+    VehicleType.SCOOT_50:  18.0,   # bridé, mais il se faufile
     VehicleType.SCOOT_125: 24.0,   # voies rapides accessibles
-    VehicleType.VOITURE:   20.0,
-    VehicleType.FOURGON:   14.0,   # gabarit + stationnement difficile
+    VehicleType.VOITURE:   13.0,   # traverser Paris en voiture prend bien plus longtemps
+    VehicleType.FOURGON:   11.0,   # gabarit + stationnement difficile
 }
 
 # Au-delà de ce délai sans signal, la position est signalée comme périmée.

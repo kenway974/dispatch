@@ -759,3 +759,100 @@ class TestTourneeDeCompta:
         pas. Huit courses entrent, huit courses sont attribuées.
         """
         assert len(self._dispatcher_la_tournee()) == 8
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Situation 5 — « commandé en voiture » n'oblige personne
+# ═══════════════════════════════════════════════════════════════════════════
+
+DIX_NEUVIEME = GpsPosition(lat=48.8817, lon=2.3822)
+VINGTIEME_S5 = GpsPosition(lat=48.8656, lon=2.3958)
+
+
+class TestCourseCommandeeEnVoiture:
+    """
+    « J'étais en route vers le 19e. Une course commandée EN VOITURE tombe, à
+    ramasser dans le 20e — juste à côté. On me l'attribue. Je vais vérifier sur
+    place si je peux prendre le carton moi-même : une voiture met beaucoup plus
+    de temps qu'un scooter à traverser Paris, et coûte plus cher à faire rouler.
+    Deux gros cartons, ça rentre dans ma caisse. Je préviens le dispatch que je
+    la fais en scooter. »
+
+    Ce que le client commande et ce que le colis pèse sont deux choses. La
+    première se facture, la seconde décide de qui peut la porter. Les confondre
+    exclurait tous les scooters d'une course qu'ils peuvent très bien faire.
+
+    Le coursier ne touche à rien dans la fiche : il ramasse et valide, ou il
+    appelle le dispatch si ça ne rentre pas.
+    """
+
+    def _en_route_vers_le_19e(self) -> Coursier:
+        return Coursier(
+            code="KEN", vehicle_type=VehicleType.SCOOT_125, position=DIX_NEUVIEME,
+            assigned_orders=[course_portee("EN-COURS", DIX_NEUVIEME, DIX_SEPTIEME)],
+        )
+
+    def _commandee_en_voiture(self, volume: VolumeType) -> Order:
+        c = commande("VOIT", VINGTIEME_S5, DIX_SEPTIEME)
+        c.volume_type = volume
+        c.vehicule_demande = VehicleType.VOITURE
+        return c
+
+    def test_un_scooter_prend_une_course_commandee_en_voiture(self) -> None:
+        """Deux gros cartons qui rentrent dans la caisse : rien ne l'en empêche."""
+        from app.services.dispatch import motif_inegibilite
+        course = self._commandee_en_voiture(VolumeType.VOLUME)
+        assert motif_inegibilite(self._en_route_vers_le_19e(), course) is None
+
+    def test_la_demande_du_client_ne_penalise_pas_le_scooter(self) -> None:
+        """
+        Elle est indicative et facturée, pas contraignante. Le scooter ne doit
+        pas être défavorisé pour l'avoir prise.
+        """
+        from app.services.dispatch import score_detail
+        coursier = self._en_route_vers_le_19e()
+        avec_demande = score_detail(coursier, self._commandee_en_voiture(VolumeType.VOLUME))
+
+        sans = commande("VOIT", VINGTIEME_S5, DIX_SEPTIEME)
+        sans.volume_type = VolumeType.VOLUME
+        assert avec_demande.total == pytest.approx(score_detail(coursier, sans).total)
+
+    def test_un_colis_reellement_trop_gros_reste_interdit(self) -> None:
+        """
+        La demande du client ne contraint pas, mais le volume réel, si. Un colis
+        qui ne rentre pas dans la caisse ne rentre pas dans la caisse.
+        """
+        from app.services.dispatch import motif_inegibilite
+        course = self._commandee_en_voiture(VolumeType.VOITURE)
+        assert motif_inegibilite(self._en_route_vers_le_19e(), course) is not None
+
+    def test_le_coursier_qui_passe_a_cote_l_emporte(self) -> None:
+        """« On me l'attribue parce que j'étais en route pour aller juste à côté. »"""
+        fleet = FleetManager()
+        a_cote = self._en_route_vers_le_19e()
+        loin = Coursier(code="LOI", vehicle_type=VehicleType.VOITURE, position=CRETEIL)
+        fleet.add_coursier(a_cote)
+        fleet.add_coursier(loin)
+        fleet.add_order(commande("EN-COURS", DIX_NEUVIEME, DIX_SEPTIEME))
+
+        course = self._commandee_en_voiture(VolumeType.VOLUME)
+        assert score_coursier(a_cote, course, fleet) < score_coursier(loin, course, fleet)
+
+
+class TestVoiturePlusLenteQueLeScooter:
+    """
+    « Une voiture met beaucoup plus de temps qu'un scooter à traverser Paris, et
+    coûte plus cher à faire rouler. »
+    """
+
+    def test_la_voiture_est_la_plus_lente_apres_le_fourgon(self) -> None:
+        from app.config import VITESSE_MOYENNE_KMH
+        assert VITESSE_MOYENNE_KMH[VehicleType.VOITURE] < VITESSE_MOYENNE_KMH[VehicleType.SCOOT_50]
+        assert VITESSE_MOYENNE_KMH[VehicleType.VOITURE] < VITESSE_MOYENNE_KMH[VehicleType.SCOOT_125]
+
+    def test_a_position_egale_le_scooter_passe_devant(self) -> None:
+        scoot = Coursier(code="SCO", vehicle_type=VehicleType.SCOOT_125, position=VINGTIEME_S5)
+        auto = Coursier(code="AUT", vehicle_type=VehicleType.VOITURE, position=VINGTIEME_S5)
+        course = commande("C", VINGTIEME_S5, DIX_SEPTIEME)
+        course.volume_type = VolumeType.VOLUME
+        assert score_coursier(scoot, course) < score_coursier(auto, course)

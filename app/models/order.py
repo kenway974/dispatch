@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field
 
-from app.models.enums import Zone, VolumeType, OrderStatus, ClientTier
+from app.models.enums import Zone, VolumeType, OrderStatus, ClientTier, VehicleType
 
 
 class Coordinates(BaseModel):
@@ -35,7 +35,24 @@ class Order(BaseModel):
     pickup: Coordinates  = Field(..., description="Point de ramassage")
     delivery: Coordinates = Field(..., description="Point de livraison")
     zone: Zone            = Field(..., description="Zone géographique de livraison")
-    volume_type: VolumeType = Field(..., description="Catégorie de volume du colis")
+    volume_type: VolumeType = Field(
+        ...,
+        description=(
+            "Encombrement RÉEL du colis, celui qui décide de qui peut le porter. "
+            "Distinct du véhicule que le client a commandé et paie."
+        ),
+    )
+    vehicule_demande: Optional["VehicleType"] = Field(
+        default=None,
+        description=(
+            "Véhicule commandé par le client, et facturé comme tel. "
+            "**Purement indicatif pour le dispatch.** Un client qui commande une "
+            "voiture pour deux cartons qui rentrent dans une caisse de scooter "
+            "paie la voiture, et un scooter peut très bien s'en charger. "
+            "Contraindre là-dessus écarterait tous les scooters d'une course "
+            "qu'ils font très bien, en plus lent et plus cher."
+        ),
+    )
 
     client_tier: ClientTier = Field(
         default=ClientTier.STANDARD,
