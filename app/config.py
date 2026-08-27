@@ -192,3 +192,8 @@ PENALITE_URGENCES_CUMULEES_KM: float = 8.0
 # ses mouvements : un crochet lui coûte moins cher qu'à quelqu'un qui court
 # après une échéance.
 FACTEUR_DETOUR_SANS_URGENCE: float = 0.6
+
+
+# Marge conservée avant la pause ou la fin de service d'un coursier, en minutes.
+# On ne l'envoie pas sur une course qui finirait pile à l'heure de son sandwich.
+MARGE_AVANT_ARRET_MINUTES: float = 10.0

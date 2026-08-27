@@ -219,3 +219,97 @@ class TestRamassageDejaFait:
         """
         nouvelle = commande("N", NEUVIEME, BOULOGNE)
         assert score_coursier(self._roger(True), nouvelle) != score_coursier(self._roger(False), nouvelle)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Situation 2 — la pause, et le relais au bureau
+# ═══════════════════════════════════════════════════════════════════════════
+
+BUREAU        = GpsPosition(lat=48.8838, lon=2.3243)   # 24 rue des Dames, 17e
+DIX_SEPTIEME  = GpsPosition(lat=48.8877, lon=2.3170)   # Batignolles
+DEUXIEME      = GpsPosition(lat=48.8679, lon=2.3410)   # Bourse
+
+
+class TestPauseImminente:
+    """
+    Kenny n'a pas encore mangé. Il devait prendre une course dans le 17e pour la
+    livrer dans le 2e. Un collègue est en pause depuis trente minutes — il va
+    bientôt reprendre.
+
+    Ce que fait Kenny : il ramasse la course dans le 17e, la laisse au bureau
+    (17e également), et part en pause. Le collègue, en rentrant, ira livrer
+    dans le 2e.
+
+    Deux choses en découlent, et le moteur ne connaît ni l'une ni l'autre :
+    l'heure à laquelle un coursier s'arrête, et la possibilité de couper une
+    course en deux.
+    """
+
+    def _duo(self, minutes_avant_pause: float):
+        """Kenny au bureau, à quelques minutes de sa pause. Le collègue en rentre."""
+        maintenant = datetime.now()
+        fleet = FleetManager()
+
+        kenny = Coursier(
+            code="KEN", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=BUREAU,
+            debut_pause=maintenant + timedelta(minutes=minutes_avant_pause),
+        )
+        collegue = Coursier(
+            code="COL", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=BUREAU,
+        )
+        fleet.add_coursier(kenny)
+        fleet.add_coursier(collegue)
+        return fleet, kenny, collegue
+
+    def test_celui_qui_part_en_pause_ne_prend_pas_ce_qu_il_ne_finira_pas(self) -> None:
+        """
+        La course 17e → 2e demande une bonne quinzaine de minutes. Kenny part
+        manger dans cinq. Elle doit aller au collègue, à position identique.
+        """
+        fleet, kenny, collegue = self._duo(minutes_avant_pause=5)
+        course = commande("C", DIX_SEPTIEME, DEUXIEME)
+
+        assert score_coursier(collegue, course, fleet) < score_coursier(kenny, course, fleet)
+
+    def test_avec_du_temps_devant_lui_kenny_la_prend_comme_avant(self) -> None:
+        """Même situation, mais sa pause est dans deux heures : plus rien ne le retient."""
+        fleet, kenny, collegue = self._duo(minutes_avant_pause=120)
+        course = commande("C", DIX_SEPTIEME, DEUXIEME)
+
+        ecart = abs(score_coursier(kenny, course, fleet) - score_coursier(collegue, course, fleet))
+        assert ecart < 0.5, "à position et charge égales, rien ne doit les départager"
+
+    def test_le_debordement_est_proportionnel(self) -> None:
+        """Plus la pause est proche, plus la course lui coûte cher."""
+        scores = []
+        for minutes in (60, 20, 5):
+            fleet, kenny, _ = self._duo(minutes_avant_pause=minutes)
+            scores.append(score_coursier(kenny, commande("C", DIX_SEPTIEME, DEUXIEME), fleet))
+        assert scores[0] <= scores[1] <= scores[2]
+
+    def test_un_coursier_sans_horaire_declare_nest_jamais_penalise(self) -> None:
+        """Tant que le dispatcheur n'a pas saisi les horaires, la règle dort."""
+        from app.services.dispatch import score_detail
+        fleet = FleetManager()
+        libre = Coursier(code="LIB", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=BUREAU)
+        fleet.add_coursier(libre)
+        detail = score_detail(libre, commande("C", DIX_SEPTIEME, DEUXIEME), fleet)
+        assert detail.penalite_debordement == 0.0
+
+
+class TestRelaisAuBureau:
+    """
+    La deuxième moitié de la situation : Kenny fait le ramassage, le collègue
+    fait la livraison. Une seule course, deux coursiers.
+
+    Le moteur en est incapable — il attribue une course entière ou rien. Ce test
+    documente la limite au lieu de la laisser dans un coin de ma tête.
+    """
+
+    @pytest.mark.xfail(reason="Le moteur ne sait pas couper une course entre deux coursiers", strict=True)
+    def test_le_ramassage_et_la_livraison_peuvent_aller_a_deux_coursiers(self) -> None:
+        from app.services.comparaison import classer_coursiers   # noqa: F401
+        raise AssertionError(
+            "Il faudrait pouvoir attribuer le ramassage à KEN et la livraison à COL, "
+            "avec le bureau comme point de passage."
+        )

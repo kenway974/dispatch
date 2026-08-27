@@ -35,6 +35,7 @@ from app.config import (
     LONG_TRIP_MIN_KM,
     LONGUE_DISTANCE_SHORT_TRIP_PENALTY_KM,
     FACTEUR_DETOUR_SANS_URGENCE,
+    MARGE_AVANT_ARRET_MINUTES,
     MARGE_SECURITE_MINUTES,
     PENALITE_RETARD_PAR_MINUTE,
     MAX_LOAD_BY_VEHICLE,
@@ -215,6 +216,46 @@ def course_pressee(order: Order) -> bool:
     return order.deadline_minutes - ecoule <= SEUIL_URGENCE_MINUTES
 
 
+def penalite_debordement_horaire(
+    coursier: Coursier,
+    order: Order,
+    maintenant: Optional[datetime] = None,
+) -> tuple[float, Optional[str]]:
+    """
+    Ce que la course déborderait sur sa pause ou sa fin de service.
+
+    Un coursier qui part manger dans cinq minutes ne prend pas une course d'un
+    quart d'heure : elle finirait au bureau, ou pas du tout. Tant que ses
+    horaires ne sont pas renseignés, la règle ne s'applique pas — on ne devine
+    pas des contraintes qu'on ne connaît pas.
+
+    Returns:
+        (pénalité en km équivalents, motif lisible).
+    """
+    arret = coursier.prochain_arret
+    if arret is None:
+        return 0.0, None
+
+    maintenant = maintenant or datetime.now()
+    disponible = (arret - maintenant).total_seconds() / 60.0 - MARGE_AVANT_ARRET_MINUTES
+
+    vitesse = VITESSE_MOYENNE_KMH[coursier.vehicle_type]
+    nouveaux = [
+        Arret(GpsPosition(lat=order.pickup.lat, lon=order.pickup.lon), order.id, est_livraison=False),
+        Arret(GpsPosition(lat=order.delivery.lat, lon=order.delivery.lon), order.id, est_livraison=True),
+    ]
+    _, km = ordonner_tournee(position_effective(coursier, maintenant),
+                             arrets_en_cours(coursier) + nouveaux)
+    necessaire = km / vitesse * 60.0
+
+    debordement = necessaire - disponible
+    if debordement <= 0:
+        return 0.0, None
+
+    motif = "déborderait sur sa pause" if coursier.debut_pause == arret else "déborderait sur sa fin de service"
+    return debordement * PENALITE_RETARD_PAR_MINUTE, motif
+
+
 def penalite_retard_induit(
     coursier: Coursier,
     order: Order,
@@ -364,6 +405,8 @@ class ScoreDetail:
     motif_retard: Optional[str]
     urgences_portees: int     # combien de courses pressées il transporte déjà
     penalite_cumul_urgences: float
+    penalite_debordement: float   # déborde sur sa pause ou sa fin de service
+    motif_debordement: Optional[str]
     trajet_km: float          # ramassage → livraison
     urgence: float            # 0.0 → 1.0
 
@@ -381,6 +424,8 @@ class ScoreDetail:
             lignes.append(f"+{self.penalite_vehicule:.1f} véhicule non idéal")
         if self.penalite_retard > 0.01 and self.motif_retard:
             lignes.append(f"+{self.penalite_retard:.1f} {self.motif_retard}")
+        if self.penalite_debordement > 0.01 and self.motif_debordement:
+            lignes.append(f"+{self.penalite_debordement:.1f} {self.motif_debordement}")
         if self.penalite_cumul_urgences > 0.01:
             lignes.append(f"+{self.penalite_cumul_urgences:.0f} il court déjà après une urgence")
         elif self.urgences_portees == 0:
@@ -433,12 +478,16 @@ def score_detail(coursier: Coursier, order: Order, fleet: "FleetManager | None" 
     # Un coursier libre de toute échéance se détourne volontiers, même de loin.
     # Un coursier qui court déjà après une urgence ne doit pas en recevoir une
     # seconde : elles se feraient rater l'une l'autre.
+    # 6. Sa pause ou sa fin de service.
+    debordement, motif_debordement = penalite_debordement_horaire(coursier, order)
+
     pressees = urgences_a_bord(coursier, fleet)
     if pressees == 0:
         detour *= FACTEUR_DETOUR_SANS_URGENCE
     penalite_cumul = PENALITE_URGENCES_CUMULEES_KM if (pressees and course_pressee(order)) else 0.0
 
-    total = max(0.01, detour + load_penalty + vehicle_penalty + retard_penalty + penalite_cumul)
+    total = max(0.01, detour + load_penalty + vehicle_penalty + retard_penalty
+                      + penalite_cumul + debordement)
 
     return ScoreDetail(
         total=total,
@@ -450,6 +499,8 @@ def score_detail(coursier: Coursier, order: Order, fleet: "FleetManager | None" 
         motif_retard=motif_retard,
         urgences_portees=pressees,
         penalite_cumul_urgences=penalite_cumul,
+        penalite_debordement=debordement,
+        motif_debordement=motif_debordement,
         trajet_km=trip_km,
         urgence=urgency,
     )

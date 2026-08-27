@@ -5,7 +5,7 @@ Modèles de données pour les coursiers.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.enums import PositionSource, VehicleType, VolumeType
@@ -85,6 +85,26 @@ class Coursier(BaseModel):
         default=PositionSource.MANUELLE,
         description="D'où vient cette position : saisie du dispatcheur ou GPS du coursier",
     )
+
+    debut_pause: Optional[datetime] = Field(
+        default=None,
+        description="Heure à laquelle il s'arrête pour manger. None = non renseignée.",
+    )
+    fin_service: Optional[datetime] = Field(
+        default=None,
+        description="Heure à laquelle il rend son scooter. None = non renseignée.",
+    )
+
+    @property
+    def prochain_arret(self) -> Optional[datetime]:
+        """
+        Le premier des deux qui arrive : sa pause ou sa fin de service.
+
+        Une course qu'il ne peut pas terminer avant cet instant n'a rien à faire
+        chez lui — elle finirait au bureau ou pas du tout.
+        """
+        moments = [m for m in (self.debut_pause, self.fin_service) if m is not None]
+        return min(moments) if moments else None
 
     @field_validator("code")
     @classmethod
