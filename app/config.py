@@ -152,6 +152,20 @@ AMPLITUDE_SERVICE: tuple[str, str] = ("08:30", "19:00")
 MARGE_SECURITE_MINUTES: float = 10.0
 
 # Pénalité, en km équivalents, par minute de retard induite sur une course déjà
-# embarquée qui a une échéance. Volontairement lourde : faire rater une livraison
-# promise coûte plus cher à l'entreprise que quelques kilomètres de détour.
-PENALITE_RETARD_PAR_MINUTE: float = 3.0
+# embarquée qui a une échéance. Une minute de retard coûte donc environ trois
+# minutes de trajet : faire rater une livraison promise vaut plus cher que
+# quelques kilomètres, sans pour autant écraser tous les autres postes.
+#
+# Calibré par simulation — scripts/simulation_journee.py, 5 journées de 100
+# courses. Au-delà, le moteur déverse le fourgon et le longue distance sur des
+# courses parisiennes dès que les scooters prennent du retard, et davantage de
+# courses finissent sans personne :
+#
+#     0,5 → 14,5 % de véhicules lourds sur course Paris ·  3 non attribuées
+#     1,0 → 16,4 %                                      ·  7
+#     3,0 → 17,1 %                                      ·  9
+#     5,0 → 18,5 %                                      ·  7
+#
+# À réviser dès que l'historique réel sera disponible : ces chiffres sortent
+# d'une journée simulée, pas de la vraie exploitation.
+PENALITE_RETARD_PAR_MINUTE: float = 1.0
