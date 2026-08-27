@@ -197,3 +197,21 @@ FACTEUR_DETOUR_SANS_URGENCE: float = 0.6
 # Marge conservée avant la pause ou la fin de service d'un coursier, en minutes.
 # On ne l'envoie pas sur une course qui finirait pile à l'heure de son sandwich.
 MARGE_AVANT_ARRET_MINUTES: float = 10.0
+
+
+# ---------------------------------------------------------------------------
+# Ré-attribution d'une course en cours
+#
+# Le dispatcheur reprend une course déjà attribuée et la bascule sur un autre
+# coursier. Le colis passe de main à main : les deux doivent donc être au même
+# endroit au moment de la passation. Ce n'est pas un lieu fixe — c'est là où ils
+# se croisent, le bureau ou ailleurs.
+# ---------------------------------------------------------------------------
+
+# Distance maximale entre deux coursiers pour qu'ils puissent se passer un colis.
+DISTANCE_PASSATION_MAX_KM: float = 0.4
+
+# Gain minimal, en km équivalents, pour qu'une ré-attribution soit proposée.
+# En dessous, la manipulation coûte plus de temps à deux personnes qu'elle n'en
+# fait gagner.
+GAIN_MINIMUM_ECHANGE_KM: float = 3.0

@@ -297,19 +297,84 @@ class TestPauseImminente:
         assert detail.penalite_debordement == 0.0
 
 
-class TestRelaisAuBureau:
+class TestReattribution:
     """
-    La deuxième moitié de la situation : Kenny fait le ramassage, le collègue
-    fait la livraison. Une seule course, deux coursiers.
+    La seconde moitié de la situation, telle qu'elle se passe vraiment.
 
-    Le moteur en est incapable — il attribue une course entière ou rien. Ce test
-    documente la limite au lieu de la laisser dans un coin de ma tête.
+    Le dispatcheur a prévu le coup : « tu ramasses dans le 17e, tu viens prendre
+    ta pause, tu donnes le colis à ton collègue qui ira dans le 2e ». Il reprend
+    la course déjà attribuée à Kenny et la bascule sur le collègue.
+
+    Ce n'est donc pas une course coupée en deux : c'est une course qui change de
+    titulaire. Le colis passe de main à main sur place — les deux sont au même
+    endroit — et rien n'attend nulle part.
+
+    Le point de passation n'est pas le bureau : c'est là où les deux se croisent.
+    Ici c'est le bureau parce que Kenny y prend sa pause, mais loin du 17e ce
+    serait ailleurs.
     """
 
-    @pytest.mark.xfail(reason="Le moteur ne sait pas couper une course entre deux coursiers", strict=True)
-    def test_le_ramassage_et_la_livraison_peuvent_aller_a_deux_coursiers(self) -> None:
-        from app.services.comparaison import classer_coursiers   # noqa: F401
-        raise AssertionError(
-            "Il faudrait pouvoir attribuer le ramassage à KEN et la livraison à COL, "
-            "avec le bureau comme point de passage."
+    def _situation(self, minutes_avant_pause: float = 5, distance_collegue_km: float = 0.0):
+        """Kenny porte la course, sa pause approche. Le collègue est à côté."""
+        maintenant = datetime.now()
+        fleet = FleetManager()
+
+        kenny = Coursier(
+            code="KEN", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=BUREAU,
+            debut_pause=maintenant + timedelta(minutes=minutes_avant_pause),
+            assigned_orders=[
+                course_portee("C17-2", DIX_SEPTIEME, DEUXIEME, ramassage_effectue=True)
+            ],
         )
+        # ~0,009° de latitude ≈ 1 km
+        collegue = Coursier(
+            code="COL", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE,
+            position=GpsPosition(lat=BUREAU.lat + distance_collegue_km * 0.009, lon=BUREAU.lon),
+        )
+        fleet.add_coursier(kenny)
+        fleet.add_coursier(collegue)
+        fleet.add_order(commande("C17-2", DIX_SEPTIEME, DEUXIEME))
+        return fleet
+
+    def test_le_moteur_propose_de_passer_la_course_au_collegue(self) -> None:
+        from app.services.reattribution import proposer_echanges
+        propositions = proposer_echanges(self._situation())
+
+        assert len(propositions) == 1
+        p = propositions[0]
+        assert p.order_id == "C17-2"
+        assert p.porteur == "KEN"
+        assert p.repreneur == "COL"
+        assert p.gain_km > 0
+
+    def test_le_motif_dit_pourquoi(self) -> None:
+        from app.services.reattribution import proposer_echanges
+        assert "pause" in proposer_echanges(self._situation())[0].motif
+
+    def test_rien_a_proposer_si_kenny_a_le_temps(self) -> None:
+        """Sa pause est dans deux heures : il n'y a aucune raison de lui reprendre."""
+        from app.services.reattribution import proposer_echanges
+        assert proposer_echanges(self._situation(minutes_avant_pause=120)) == []
+
+    def test_il_faut_pouvoir_se_passer_le_colis_de_la_main_a_la_main(self) -> None:
+        """
+        Un collègue à trois kilomètres ne sert à rien : le colis est dans la
+        sacoche de Kenny, il faut qu'ils soient au même endroit.
+        """
+        from app.services.reattribution import proposer_echanges
+        assert proposer_echanges(self._situation(distance_collegue_km=3)) == []
+
+    def test_le_point_de_passation_est_la_ou_ils_se_croisent(self) -> None:
+        """
+        Pas le bureau par principe : la position commune des deux. Ici c'est le
+        bureau parce que Kenny y prend sa pause, ailleurs ce serait ailleurs.
+        """
+        from app.services.geo import haversine
+        from app.services.reattribution import proposer_echanges
+        p = proposer_echanges(self._situation())[0]
+        assert haversine(p.point_passation, BUREAU) < 0.1
+
+    def test_un_gain_derisoire_ne_declenche_rien(self) -> None:
+        """Se passer un colis coûte du temps à deux personnes : il faut que ça vaille le coup."""
+        from app.services.reattribution import proposer_echanges
+        assert proposer_echanges(self._situation(), gain_minimum_km=999) == []

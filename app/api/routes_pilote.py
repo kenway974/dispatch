@@ -15,6 +15,7 @@ Routes :
   POST  /coursiers/{code}/ping               → position remontée par son téléphone
   POST  /positions/import                    → reprise des positions du système de l'entreprise
   GET   /pilote/positions                    → positions exploitables + fraîcheur
+  GET   /pilote/echanges                     → courses qui gagneraient à changer de mains
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ from app.services import storage
 from app.services.comparaison import comparer
 from app.services.fleet import fleet_manager
 from app.services.position import estimer_position
+from app.services.reattribution import proposer_echanges
 
 router = APIRouter(tags=["Mode pilote"])
 
@@ -395,4 +397,24 @@ def importer_positions(
         "mises_a_jour": len(mises_a_jour),
         "codes_mis_a_jour": mises_a_jour,
         "codes_inconnus": inconnus,
+    }
+
+
+@router.get("/pilote/echanges", tags=["Mode pilote"])
+def echanges_proposes() -> dict:
+    """
+    Courses en circulation qui gagneraient à changer de mains, maintenant.
+
+    Le dispatcheur le fait déjà de tête : « tu ramasses dans le 17e, tu viens
+    prendre ta pause, tu passes le colis à ton collègue qui ira dans le 2e ».
+    Cet endpoint cherche les mêmes occasions et dit ce qu'elles rapportent.
+
+    Une proposition n'apparaît que si les deux coursiers sont assez proches pour
+    se passer le colis de la main à la main — c'est ainsi que ça se passe, le
+    colis n'attend nulle part.
+    """
+    propositions = proposer_echanges(fleet_manager)
+    return {
+        "total": len(propositions),
+        "echanges": [e.to_dict() for e in propositions],
     }
