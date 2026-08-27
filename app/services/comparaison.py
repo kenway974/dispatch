@@ -44,6 +44,8 @@ class CandidatEvalue:
     penalite_charge: Optional[float]
     penalite_vehicule: Optional[float]
     penalite_retard: Optional[float]
+    validation_requise: bool
+    motif_validation: Optional[str]
     detour_km: Optional[float]
     explications: list[str] = field(default_factory=list)
     charge: int = 0
@@ -61,6 +63,8 @@ class CandidatEvalue:
             "penalite_charge": round(self.penalite_charge, 2) if self.penalite_charge is not None else None,
             "penalite_vehicule": round(self.penalite_vehicule, 2) if self.penalite_vehicule is not None else None,
             "penalite_retard": round(self.penalite_retard, 2) if self.penalite_retard is not None else None,
+            "validation_requise": self.validation_requise,
+            "motif_validation": self.motif_validation,
             "detour_km": round(self.detour_km, 2) if self.detour_km is not None else None,
             "explications": self.explications,
             "charge": self.charge,
@@ -89,7 +93,8 @@ def classer_coursiers(order: Order, fleet: FleetManager) -> list[CandidatEvalue]
                 eligible=False,
                 motif_inegibilite=motif,
                 rang=None, score=None, distance_km=None,
-                penalite_charge=None, penalite_vehicule=None, penalite_retard=None, detour_km=None,
+                penalite_charge=None, penalite_vehicule=None, penalite_retard=None,
+                validation_requise=False, motif_validation=None, detour_km=None,
                 charge=coursier.current_load, capacite=coursier.max_load,
             ))
             continue
@@ -106,6 +111,8 @@ def classer_coursiers(order: Order, fleet: FleetManager) -> list[CandidatEvalue]
             penalite_charge=detail.penalite_charge,
             penalite_vehicule=detail.penalite_vehicule,
             penalite_retard=detail.penalite_retard,
+            validation_requise=detail.validation_requise,
+            motif_validation=detail.motif_validation,
             detour_km=detail.detour_km,
             explications=detail.explications(),
             charge=coursier.current_load,

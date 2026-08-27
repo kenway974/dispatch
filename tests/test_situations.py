@@ -507,3 +507,191 @@ class TestMemeClientQuiRappelle:
         seconde = commande("SECONDE", CONCORDE_S3, DEUXIEME)
 
         assert score_coursier(proche, seconde, fleet_proche) < score_coursier(loin, seconde, fleet_loin)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Situation 4 — le moteur n'a pas toujours à trancher
+# ═══════════════════════════════════════════════════════════════════════════
+
+DEPOT = GpsPosition(lat=48.8838, lon=2.3243)      # 24 rue des Dames, 17e
+CRETEIL = GpsPosition(lat=48.7773, lon=2.4555)
+
+
+class TestFinDeServiceProche:
+    """
+    « Ça me ferait péter un câble qu'un robot me dise que non, en fait, tu n'as
+    pas fini, tu continues de travailler. Si une course arrive et qu'on
+    l'attribuerait à un coursier qui termine dans moins de trente minutes, on
+    laisse le choix au dispatch, qui négociera avec le coursier. »
+
+    Le moteur cesse donc de trancher seul dans ce cas. Il désigne toujours le
+    meilleur candidat, mais il le marque : à valider avec l'intéressé.
+    """
+
+    def _coursier(self, minutes_avant_fin: float) -> Coursier:
+        return Coursier(
+            code="FIN", vehicle_type=VehicleType.SCOOT_50, position=DEUXIEME,
+            fin_service=datetime.now() + timedelta(minutes=minutes_avant_fin),
+        )
+
+    def test_moins_de_trente_minutes_le_dispatcheur_tranche(self) -> None:
+        from app.services.dispatch import score_detail
+        detail = score_detail(self._coursier(20), commande("C", DIX_SEPTIEME, DEUXIEME))
+        assert detail.validation_requise is True
+        assert "termine" in detail.motif_validation
+
+    def test_avec_du_temps_le_moteur_decide_seul(self) -> None:
+        from app.services.dispatch import score_detail
+        detail = score_detail(self._coursier(180), commande("C", DIX_SEPTIEME, DEUXIEME))
+        assert detail.validation_requise is False
+
+    def test_sans_horaire_declare_aucune_validation(self) -> None:
+        from app.services.dispatch import score_detail
+        libre = Coursier(code="LIB", vehicle_type=VehicleType.SCOOT_50, position=DEUXIEME)
+        assert score_detail(libre, commande("C", DIX_SEPTIEME, DEUXIEME)).validation_requise is False
+
+
+class TestTrajetRetour:
+    """
+    « Je finis à Créteil, je rentre au local. S'il y a une course qui tombe et
+    que je peux la ramasser sur la route, je la ramasse. Il ne faut pas que ça
+    perturbe mon trajet retour. Si ça ne perturbe pas, on peut l'attribuer ; si
+    ça perturbe un peu, on laisse le choix au dispatch. »
+    """
+
+    def _rentrant(self) -> Coursier:
+        """À Créteil, il termine dans une heure et rentre au dépôt du 17e."""
+        return Coursier(
+            code="RET", vehicle_type=VehicleType.SCOOT_125, position=CRETEIL,
+            fin_service=datetime.now() + timedelta(minutes=60),
+            retour_depot=DEPOT,
+        )
+
+    def test_une_course_sur_le_trajet_retour_est_moins_chere_qu_un_contresens(self) -> None:
+        """
+        Créteil → Nation → 17e, c'est sa route. Créteil → Marne-la-Vallée, c'est
+        plein est, à l'opposé du dépôt.
+        """
+        from app.services.dispatch import score_detail
+        rentrant = self._rentrant()
+        sur_la_route = score_detail(rentrant, commande("C", NATION_S4, DIX_SEPTIEME))
+        a_contresens = score_detail(rentrant, commande("C", CRETEIL, MARNE, zone=Zone.GRANDE_COURONNE))
+        assert sur_la_route.total < a_contresens.total
+
+    def test_une_course_sur_sa_route_ne_demande_aucune_validation(self) -> None:
+        from app.services.dispatch import score_detail
+        assert score_detail(self._rentrant(), commande("C", NATION_S4, DIX_SEPTIEME)).validation_requise is False
+
+    def test_un_contresens_rend_la_main_au_dispatcheur(self) -> None:
+        """« si ça perturbe un peu le trajet retour, on laisse le choix au dispatch »"""
+        from app.services.dispatch import score_detail
+        detail = score_detail(self._rentrant(), commande("C", CRETEIL, MARNE, zone=Zone.GRANDE_COURONNE))
+        assert detail.validation_requise is True
+        assert "trajet retour" in detail.motif_validation
+
+    def test_le_motif_annonce_le_meme_detour_que_le_classement(self) -> None:
+        """Le dispatcheur ne doit pas lire deux nombres différents pour la même chose."""
+        from app.services.dispatch import score_detail
+        detail = score_detail(self._rentrant(), commande("C", CRETEIL, MARNE, zone=Zone.GRANDE_COURONNE))
+        assert f"{detail.detour_km:.1f}" in detail.motif_validation
+
+    def test_sans_depot_declare_le_retour_nest_pas_compte(self) -> None:
+        """Tant que le dispatcheur n'a rien saisi, on n'invente pas un trajet retour."""
+        from app.services.dispatch import arrets_en_cours
+        sans = Coursier(code="SAN", vehicle_type=VehicleType.SCOOT_125, position=CRETEIL)
+        assert arrets_en_cours(sans) == []
+
+
+NATION_S4 = GpsPosition(lat=48.8483, lon=2.3958)
+MARNE = GpsPosition(lat=48.8420, lon=2.7870)      # plein est, à l'opposé du dépôt
+VILLEJUIF_S4 = GpsPosition(lat=48.7933, lon=2.3636)
+
+
+class TestDisponibiliteClient:
+    """
+    « Il faut ajouter la notion de disponibilité chez les clients : les horaires
+    dans lesquels on peut les livrer, et ne pas les livrer. »
+
+    Une entreprise qui ferme à midi ne se livre pas à 14h, quel que soit le
+    coursier. C'est un filtre, pas une pénalité.
+    """
+
+    def _course_avec_fenetre(self, ouverture: str, fermeture: str) -> Order:
+        c = commande("C", DIX_SEPTIEME, DEUXIEME)
+        c.livraison_ouverture = ouverture
+        c.livraison_fermeture = fermeture
+        return c
+
+    def test_hors_plage_le_coursier_est_ecarte(self) -> None:
+        from app.services.dispatch import motif_inegibilite
+        c = Coursier(code="KEN", vehicle_type=VehicleType.SCOOT_50, position=DIX_SEPTIEME)
+        # Une fenêtre déjà refermée : personne ne peut plus livrer
+        motif = motif_inegibilite(c, self._course_avec_fenetre("00:00", "00:01"))
+        assert motif is not None and "ferm" in motif.lower()
+
+    def test_dans_la_plage_tout_va_bien(self) -> None:
+        from app.services.dispatch import motif_inegibilite
+        c = Coursier(code="KEN", vehicle_type=VehicleType.SCOOT_50, position=DIX_SEPTIEME)
+        assert motif_inegibilite(c, self._course_avec_fenetre("00:00", "23:59")) is None
+
+    def test_sans_plage_declaree_aucune_contrainte(self) -> None:
+        from app.services.dispatch import motif_inegibilite
+        c = Coursier(code="KEN", vehicle_type=VehicleType.SCOOT_50, position=DIX_SEPTIEME)
+        assert motif_inegibilite(c, commande("C", DIX_SEPTIEME, DEUXIEME)) is None
+
+
+class TestAttenteSurPlace:
+    """
+    « Si on attend trente minutes sur place, ça reste toujours une course, mais
+    on facture l'attente. »
+
+    Une seule course, donc. Mais ces trente minutes existent dans la journée du
+    coursier et doivent peser sur ce qu'on lui donne ensuite.
+    """
+
+    def test_l_attente_declaree_alourdit_la_tournee(self) -> None:
+        from app.services.dispatch import score_detail
+        base = Coursier(code="ATT", vehicle_type=VehicleType.SCOOT_50, position=DIX_SEPTIEME,
+                        fin_service=datetime.now() + timedelta(minutes=45))
+        sans = commande("C", DIX_SEPTIEME, DEUXIEME)
+        avec = commande("C", DIX_SEPTIEME, DEUXIEME)
+        avec.minutes_attente = 30
+
+        assert score_detail(base, avec).total > score_detail(base, sans).total
+
+
+class TestLabelTournee:
+    """
+    « On doit pouvoir avoir un label tournée, une propriété qui indique qu'une
+    course fait partie d'une tournée ou si c'est une course à course. »
+
+    Et le coursier en tournée reste dispatchable tant qu'il n'est pas surchargé :
+    celui qui a neuf restaurants du 9e est indisponible, celui qui a trois
+    livraisons dans le 13e peut encore prendre une course qui va dans le 13e.
+    """
+
+    def test_une_course_porte_son_label(self) -> None:
+        c = commande("C", DIX_SEPTIEME, DEUXIEME)
+        c.tournee = "compta-lundi-8e"
+        assert c.tournee == "compta-lundi-8e"
+
+    def test_par_defaut_une_course_est_a_la_course(self) -> None:
+        assert commande("C", DIX_SEPTIEME, DEUXIEME).tournee is None
+
+    def test_un_coursier_en_tournee_legere_reste_dispatchable(self) -> None:
+        """Trois livraisons dans le 13e : il peut encore prendre une course qui y va."""
+        from app.services.dispatch import motif_inegibilite
+        en_tournee = Coursier(
+            code="TRN", vehicle_type=VehicleType.SCOOT_50, position=DIX_SEPTIEME,
+            assigned_orders=[course_portee(f"T{i}", DIX_SEPTIEME, DEUXIEME, True) for i in range(3)],
+        )
+        assert motif_inegibilite(en_tournee, commande("C", DEUXIEME, DEUXIEME)) is None
+
+    def test_un_coursier_en_tournee_chargee_ne_l_est_plus(self) -> None:
+        """Neuf restaurants du 9e : sa capacité le sort d'elle-même du classement."""
+        from app.services.dispatch import motif_inegibilite
+        charge = Coursier(
+            code="TRN", vehicle_type=VehicleType.SCOOT_50, position=DIX_SEPTIEME,
+            assigned_orders=[course_portee(f"T{i}", DIX_SEPTIEME, DEUXIEME, True) for i in range(5)],
+        )
+        assert motif_inegibilite(charge, commande("C", DEUXIEME, DEUXIEME)) is not None

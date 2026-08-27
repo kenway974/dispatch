@@ -160,7 +160,12 @@ def delester_coursier(fleet: FleetManager, code: str) -> list[Transfert]:
     Vide le portefeuille d'un coursier immobilisé et le met hors service.
 
     Crevaison, panne, malaise : il appelle le dispatch, et on répartit ses
-    courses sur les collègues proches ou peu chargés. Deux différences avec une
+    courses sur les collègues proches ou peu chargés.
+
+    **Jamais déclenché automatiquement.** Accumuler du retard n'est pas un motif :
+    chacun son rythme, et un coursier qu'on délesterait pour cause de lenteur
+    aurait raison de le prendre mal. Cette fonction ne s'appelle qu'à la demande
+    du dispatcheur, prévenu par le coursier lui-même. Deux différences avec une
     passation ordinaire :
 
     - **le collègue se déplace**, donc on n'exige pas qu'ils soient déjà côte à

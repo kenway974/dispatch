@@ -50,6 +50,33 @@ class Order(BaseModel):
         ),
     )
 
+    livraison_ouverture: Optional[str] = Field(
+        default=None,
+        description="Heure HH:MM à partir de laquelle le destinataire accepte la livraison",
+    )
+    livraison_fermeture: Optional[str] = Field(
+        default=None,
+        description=(
+            "Heure HH:MM au-delà de laquelle il n'accepte plus. Une entreprise qui "
+            "ferme à midi ne se livre pas à 14h, quel que soit le coursier."
+        ),
+    )
+    minutes_attente: float = Field(
+        default=0.0, ge=0,
+        description=(
+            "Immobilisation prévue sur place — le temps qu'on remette le pli. "
+            "Cela reste une seule course, facturée avec son attente, mais ces "
+            "minutes existent dans la journée du coursier."
+        ),
+    )
+    tournee: Optional[str] = Field(
+        default=None,
+        description=(
+            "Nom de la tournée dont cette course fait partie, par exemple "
+            "« compta-lundi-8e ». None pour une course à la course."
+        ),
+    )
+
     status: OrderStatus    = Field(default=OrderStatus.PENDING)
     assigned_coursier: Optional[str] = Field(default=None)
     created_at: datetime   = Field(default_factory=datetime.now)

@@ -234,3 +234,21 @@ MINUTES_PAR_ARRET: float = 3.0
 # minutes n'en fait jamais 24 : rue barrée, manifestation, livraison en double
 # file devant. On prévoit large plutôt que de promettre juste.
 MARGE_TRAJET: float = 1.25
+
+
+# ---------------------------------------------------------------------------
+# Là où le moteur cesse de trancher seul
+#
+# « Ça me ferait péter un câble qu'un robot me dise que non, en fait, tu n'as
+# pas fini, tu continues de travailler. »
+#
+# Dans ces cas, le moteur désigne toujours le meilleur candidat, mais il le
+# marque : à valider avec l'intéressé. Le dispatcheur négocie, puis tranche.
+# ---------------------------------------------------------------------------
+
+# En deçà de ce temps avant la fin de service, on ne décide plus à sa place.
+SEUIL_VALIDATION_FIN_SERVICE_MINUTES: float = 30.0
+
+# Détour supplémentaire, en km, au-delà duquel une course prise sur le trajet
+# retour cesse d'aller de soi. En dessous : ça ne le perturbe pas, on attribue.
+SEUIL_VALIDATION_DETOUR_RETOUR_KM: float = 2.0

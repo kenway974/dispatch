@@ -45,6 +45,8 @@ from app.config import (
     PENALITE_URGENCES_CUMULEES_KM,
     PREMIUM_PENALTY_FACTOR,
     SEUIL_URGENCE_MINUTES,
+    SEUIL_VALIDATION_DETOUR_RETOUR_KM,
+    SEUIL_VALIDATION_FIN_SERVICE_MINUTES,
     VITESSE_MOYENNE_KMH,
     SCOOT_50_EN_PETITE_COURONNE_PENALITE_KM,
     URGENCY_LOAD_PENALTY_MIN_FACTOR,
@@ -95,6 +97,13 @@ def arrets_en_cours(coursier: Coursier) -> List[Arret]:
         if not course.ramassage_effectue:
             arrets.append(Arret(course.pickup_position, course.order_id, est_livraison=False))
         arrets.append(Arret(course.delivery_position, course.order_id, est_livraison=True))
+
+    # Le retour au dépôt fait partie de sa journée : une course sur le chemin ne
+    # lui coûte presque rien, une course à l'opposé le fait dévier pour rien.
+    # Tant qu'aucun dépôt n'est renseigné, on n'invente pas ce trajet.
+    if coursier.retour_depot is not None:
+        arrets.append(Arret(coursier.retour_depot, "RETOUR-DEPOT", est_livraison=True))
+
     return arrets
 
 
@@ -135,7 +144,14 @@ def motif_inegibilite(coursier: Coursier, order: Order) -> Optional[str]:
             return "Grande Couronne : pas assez d'autonomie (aucune batterie de rechange)"
         return f"Zone {order.zone.value.replace('_', ' ')} hors périmètre (couvre : {zones})"
 
-    # Règle 4 : capacité
+    # Règle 4 : le destinataire accepte-t-il encore une livraison ?
+    # Une entreprise qui ferme à midi ne se livre pas à 14h, quel que soit le
+    # coursier — c'est un filtre, pas une pénalité.
+    hors_plage = _hors_plage_de_livraison(order)
+    if hors_plage:
+        return hors_plage
+
+    # Règle 5 : capacité
     order_weight = VOLUME_WEIGHTS[order.volume_type]
     if coursier.current_load + order_weight > MAX_LOAD_BY_VEHICLE[coursier.vehicle_type]:
         return (
@@ -143,6 +159,26 @@ def motif_inegibilite(coursier: Coursier, order: Order) -> Optional[str]:
             f"utilisées, ce colis en demande {order_weight}"
         )
 
+    return None
+
+
+def _hors_plage_de_livraison(order: Order, maintenant: Optional[datetime] = None) -> Optional[str]:
+    """
+    Vérifie que le destinataire accepte encore une livraison aujourd'hui.
+
+    Tant qu'aucune plage n'est renseignée, la règle dort : on ne devine pas des
+    horaires d'ouverture qu'on ne connaît pas.
+    """
+    if order.livraison_ouverture is None and order.livraison_fermeture is None:
+        return None
+
+    maintenant = maintenant or datetime.now()
+    heure = maintenant.strftime("%H:%M")
+
+    if order.livraison_fermeture and heure > order.livraison_fermeture:
+        return f"Destinataire fermé (livrable jusqu'à {order.livraison_fermeture})"
+    if order.livraison_ouverture and heure < order.livraison_ouverture:
+        return f"Destinataire pas encore ouvert (à partir de {order.livraison_ouverture})"
     return None
 
 
@@ -227,6 +263,36 @@ def course_pressee(order: Order) -> bool:
     return order.deadline_minutes - ecoule <= SEUIL_URGENCE_MINUTES
 
 
+def avis_de_validation(
+    coursier: Coursier,
+    detour_km: float,
+    maintenant: Optional[datetime] = None,
+) -> tuple[bool, Optional[str]]:
+    """
+    Dit si le moteur doit rendre la main au dispatcheur plutôt que trancher.
+
+    Deux situations où décider à la place du coursier serait déplacé :
+
+    - **il termine bientôt.** Lui annoncer qu'il n'a pas fini sa journée n'est
+      pas une décision d'algorithme. Le dispatcheur négocie, puis tranche.
+    - **la course dévie son trajet retour.** Un crochet sur la route du dépôt ne
+      pose aucun problème ; au-delà, on lui demande.
+
+    Le meilleur candidat reste désigné dans les deux cas — c'est un avis joint
+    au classement, pas un refus.
+    """
+    fin = coursier.fin_service
+    if fin is not None:
+        restant = (fin - (maintenant or datetime.now())).total_seconds() / 60.0
+        if restant <= SEUIL_VALIDATION_FIN_SERVICE_MINUTES:
+            return True, f"il termine dans {max(0, int(restant))} min — à voir avec lui"
+
+    if coursier.retour_depot is not None and detour_km > SEUIL_VALIDATION_DETOUR_RETOUR_KM:
+        return True, f"le dévie de {detour_km:.1f} km sur son trajet retour — à voir avec lui"
+
+    return False, None
+
+
 def penalite_debordement_horaire(
     coursier: Coursier,
     order: Order,
@@ -257,7 +323,7 @@ def penalite_debordement_horaire(
     ]
     tous = arrets_en_cours(coursier) + nouveaux
     _, km = ordonner_tournee(position_effective(coursier, maintenant), tous)
-    necessaire = minutes_pour_parcourir(km, vitesse, len(tous))
+    necessaire = minutes_pour_parcourir(km, vitesse, len(tous)) + order.minutes_attente
 
     debordement = necessaire - disponible
     if debordement <= 0:
@@ -430,6 +496,8 @@ class ScoreDetail:
     penalite_cumul_urgences: float
     penalite_debordement: float   # déborde sur sa pause ou sa fin de service
     motif_debordement: Optional[str]
+    validation_requise: bool      # le moteur propose, le dispatcheur tranche
+    motif_validation: Optional[str]
     trajet_km: float          # ramassage → livraison
     urgence: float            # 0.0 → 1.0
 
@@ -449,6 +517,8 @@ class ScoreDetail:
             lignes.append(f"+{self.penalite_retard:.1f} {self.motif_retard}")
         if self.penalite_debordement > 0.01 and self.motif_debordement:
             lignes.append(f"+{self.penalite_debordement:.1f} {self.motif_debordement}")
+        if self.validation_requise and self.motif_validation:
+            lignes.append(f"⚠ {self.motif_validation}")
         if self.penalite_cumul_urgences > 0.01:
             lignes.append(f"+{self.penalite_cumul_urgences:.0f} il court déjà après une urgence")
         elif self.urgences_portees == 0:
@@ -509,6 +579,11 @@ def score_detail(coursier: Coursier, order: Order, fleet: "FleetManager | None" 
         detour *= FACTEUR_DETOUR_SANS_URGENCE
     penalite_cumul = PENALITE_URGENCES_CUMULEES_KM if (pressees and course_pressee(order)) else 0.0
 
+    # 7. Le moteur doit-il trancher, ou rendre la main ?
+    # Calculé sur le détour final : le motif affiché doit annoncer le même
+    # nombre de kilomètres que celui que le dispatcheur lit dans le classement.
+    validation, motif_validation = avis_de_validation(coursier, detour)
+
     total = max(0.01, detour + load_penalty + vehicle_penalty + retard_penalty
                       + penalite_cumul + debordement)
 
@@ -524,6 +599,8 @@ def score_detail(coursier: Coursier, order: Order, fleet: "FleetManager | None" 
         penalite_cumul_urgences=penalite_cumul,
         penalite_debordement=debordement,
         motif_debordement=motif_debordement,
+        validation_requise=validation,
+        motif_validation=motif_validation,
         trajet_km=trip_km,
         urgence=urgency,
     )

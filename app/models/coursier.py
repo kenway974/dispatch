@@ -99,6 +99,14 @@ class Coursier(BaseModel):
         default=None,
         description="Heure à laquelle il s'arrête pour manger. None = non renseignée.",
     )
+    retour_depot: Optional[GpsPosition] = Field(
+        default=None,
+        description=(
+            "Où il rentre en fin de service. Renseigné, ce retour devient le "
+            "dernier point de sa tournée : une course sur le chemin ne lui coûte "
+            "presque rien, une course à l'opposé le fait dévier pour rien."
+        ),
+    )
     fin_service: Optional[datetime] = Field(
         default=None,
         description="Heure à laquelle il rend son scooter. None = non renseignée.",
