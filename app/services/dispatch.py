@@ -15,8 +15,8 @@ FORMULE DE SCORING (plus bas = meilleur coursier)
         − bonus_groupage       (désactivé si urgence > seuil)
 
 Pénalités véhicule (pour orienter sans bloquer) :
-  • scoot_banlieue_loin en Petite Couronne  → +2 km (hors zone principale)
-  • longue_distance sur trajet < 25 km      → +10 km (préférer scooters)
+  • scoot_125 en Petite Couronne  → +2 km (hors zone principale)
+  • voiture sur trajet < 25 km      → +10 km (préférer scooters)
   • fourgon sur petit volume + trajet < 15km → +6 km (préférer scooters)
   → toutes réduites à 40 % pour un client Premium
 """
@@ -29,13 +29,16 @@ from typing import List, Optional
 
 from app.config import (
     ELIGIBLE_ZONES_BY_VEHICLE,
+    VEHICULES_AUTONOMIE_ETENDUE_POSSIBLE,
     FOURGON_SMALL_TRIP_MAX_KM,
     FOURGON_SMALL_TRIP_PENALTY_KM,
     LOAD_PENALTY_PER_UNIT,
     LONG_TRIP_MIN_KM,
-    LONGUE_DISTANCE_SHORT_TRIP_PENALTY_KM,
+    VOITURE_SHORT_TRIP_PENALTY_KM,
     FACTEUR_DETOUR_SANS_URGENCE,
     MARGE_AVANT_ARRET_MINUTES,
+    MARGE_TRAJET,
+    MINUTES_PAR_ARRET,
     MARGE_SECURITE_MINUTES,
     PENALITE_RETARD_PAR_MINUTE,
     MAX_LOAD_BY_VEHICLE,
@@ -43,7 +46,7 @@ from app.config import (
     PREMIUM_PENALTY_FACTOR,
     SEUIL_URGENCE_MINUTES,
     VITESSE_MOYENNE_KMH,
-    SCOOT_LOIN_IN_PC_PENALTY_KM,
+    SCOOT_50_EN_PETITE_COURONNE_PENALITE_KM,
     URGENCY_LOAD_PENALTY_MIN_FACTOR,
     VOLUME_WEIGHTS,
 )
@@ -102,7 +105,7 @@ def motif_inegibilite(coursier: Coursier, order: Order) -> Optional[str]:
 
     Règles :
     1. Coursier actif.
-    2. Colis Voiture → fourgon ou longue_distance uniquement (trop volumineux pour scooter).
+    2. Colis Voiture → fourgon ou voiture uniquement (trop volumineux pour scooter).
     3. La zone de livraison doit être dans les zones autorisées du véhicule.
     4. La charge actuelle + poids du colis ne doit pas dépasser la capacité max.
 
@@ -115,12 +118,21 @@ def motif_inegibilite(coursier: Coursier, order: Order) -> Optional[str]:
 
     # Règle 2 : colis Voiture — réservé aux véhicules adaptés
     if order.volume_type == VolumeType.VOITURE:
-        if coursier.vehicle_type not in (VehicleType.FOURGON, VehicleType.LONGUE_DISTANCE):
+        if coursier.vehicle_type not in (VehicleType.FOURGON, VehicleType.VOITURE):
             return "Colis Voiture : nécessite un fourgon ou un longue distance"
 
-    # Règle 3 : zone
-    if order.zone not in ELIGIBLE_ZONES_BY_VEHICLE[coursier.vehicle_type]:
-        zones = ", ".join(z.value.replace("_", " ") for z in ELIGIBLE_ZONES_BY_VEHICLE[coursier.vehicle_type])
+    # Règle 3 : zone, élargie par l'autonomie du coursier.
+    # La Grande Couronne n'est pas fermée aux scooters : elle est ouverte à ceux
+    # qui emportent des batteries de rechange.
+    zones_couvertes = list(ELIGIBLE_ZONES_BY_VEHICLE[coursier.vehicle_type])
+    if coursier.autonomie_etendue and coursier.vehicle_type in VEHICULES_AUTONOMIE_ETENDUE_POSSIBLE:
+        if Zone.GRANDE_COURONNE not in zones_couvertes:
+            zones_couvertes.append(Zone.GRANDE_COURONNE)
+
+    if order.zone not in zones_couvertes:
+        zones = ", ".join(z.value.replace("_", " ") for z in zones_couvertes)
+        if order.zone == Zone.GRANDE_COURONNE and coursier.vehicle_type in VEHICULES_AUTONOMIE_ETENDUE_POSSIBLE:
+            return "Grande Couronne : pas assez d'autonomie (aucune batterie de rechange)"
         return f"Zone {order.zone.value.replace('_', ' ')} hors périmètre (couvre : {zones})"
 
     # Règle 4 : capacité
@@ -165,15 +177,14 @@ def _vehicle_sub_optimal_penalty(
     vtype   = coursier.vehicle_type
     penalty = 0.0
 
-    # scoot_banlieue_loin affecté en Petite Couronne
-    # → hors zone principale (GC), les scoot_banlieue_proche sont prioritaires sur PC
-    if vtype == VehicleType.SCOOT_BANLIEUE_LOIN and order.zone == Zone.PETITE_COURONNE:
-        penalty += SCOOT_LOIN_IN_PC_PENALTY_KM
+    # Un 50 en Petite Couronne : accepté, mais on y préfère un 125.
+    # Pénalité légère — s'il est le mieux placé, il y va quand même.
+    if vtype == VehicleType.SCOOT_50 and order.zone == Zone.PETITE_COURONNE:
+        penalty += SCOOT_50_EN_PETITE_COURONNE_PENALITE_KM
 
-    # longue_distance sur court trajet
-    # → spécialisé pour les gros trajets ; scooters plus agiles en ville
-    if vtype == VehicleType.LONGUE_DISTANCE and trip_km < LONG_TRIP_MIN_KM:
-        penalty += LONGUE_DISTANCE_SHORT_TRIP_PENALTY_KM
+    # Voiture sur trajet court : un scooter passe mieux dans Paris.
+    if vtype == VehicleType.VOITURE and trip_km < LONG_TRIP_MIN_KM:
+        penalty += VOITURE_SHORT_TRIP_PENALTY_KM
 
     # fourgon sur petit volume + court trajet
     # → privilégier un scooter, moins coûteux et plus manœuvrable
@@ -244,9 +255,9 @@ def penalite_debordement_horaire(
         Arret(GpsPosition(lat=order.pickup.lat, lon=order.pickup.lon), order.id, est_livraison=False),
         Arret(GpsPosition(lat=order.delivery.lat, lon=order.delivery.lon), order.id, est_livraison=True),
     ]
-    _, km = ordonner_tournee(position_effective(coursier, maintenant),
-                             arrets_en_cours(coursier) + nouveaux)
-    necessaire = km / vitesse * 60.0
+    tous = arrets_en_cours(coursier) + nouveaux
+    _, km = ordonner_tournee(position_effective(coursier, maintenant), tous)
+    necessaire = minutes_pour_parcourir(km, vitesse, len(tous))
 
     debordement = necessaire - disponible
     if debordement <= 0:
@@ -329,6 +340,18 @@ def _echeances_embarquees(coursier: Coursier, fleet: "FleetManager | None") -> d
     return restantes
 
 
+def minutes_pour_parcourir(km: float, vitesse_kmh: float, nb_arrets: int) -> float:
+    """
+    Temps réel d'une tournée : le trajet majoré, plus le temps passé sur place.
+
+    Deux choses que la carte ne montre pas. Un itinéraire annoncé à 24 minutes
+    n'en fait jamais 24 — rue barrée, double file, manifestation. Et à chaque
+    arrêt il faut trouver la porte, monter, attendre à l'accueil, faire signer.
+    Les ignorer sous-estimait chaque tournée d'autant.
+    """
+    return km / vitesse_kmh * 60.0 * MARGE_TRAJET + nb_arrets * MINUTES_PAR_ARRET
+
+
 def _minutes_avant_livraison(
     depart: GpsPosition,
     arrets: List[Arret],
@@ -339,11 +362,11 @@ def _minutes_avant_livraison(
     minutes: dict[str, float] = {}
     position = depart
     cumul_km = 0.0
-    for arret in ordre:
+    for rang, arret in enumerate(ordre, start=1):
         cumul_km += haversine(position, arret.position)
         position = arret.position
         if arret.est_livraison:
-            minutes[arret.course_id] = cumul_km / vitesse_kmh * 60.0
+            minutes[arret.course_id] = minutes_pour_parcourir(cumul_km, vitesse_kmh, rang)
     return minutes
 
 

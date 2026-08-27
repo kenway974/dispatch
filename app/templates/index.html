@@ -113,10 +113,10 @@
               <div>
                 <label class="text-xs font-medium text-gray-600 mb-1 block">Véhicule</label>
                 <select id="c-type" class="addr-input">
-                  <option value="scoot_ville">🛵 Scoot Paris (50cc)</option>
-                  <option value="scoot_banlieue_proche">🛵 Scoot Petite Couronne (50cc)</option>
-                  <option value="scoot_banlieue_loin">🛵 Scoot Grande Couronne (125cc+)</option>
-                  <option value="longue_distance">🚗 Longue Distance</option>
+                  <option value="scoot_50">🛵 Scoot Paris (50cc)</option>
+                  <option value="scoot_50">🛵 Scoot Petite Couronne (50cc)</option>
+                  <option value="scoot_125">🛵 Scoot Grande Couronne (125cc+)</option>
+                  <option value="voiture">🚗 Longue Distance</option>
                   <option value="fourgon">🚐 Fourgon</option>
                 </select>
               </div>
@@ -424,10 +424,10 @@
       <div>
         <label class="text-xs font-medium text-gray-600 mb-1 block">Type de véhicule</label>
         <select id="edit-vehicle" class="addr-input">
-          <option value="scoot_ville">🛵 Scoot Paris (50cc)</option>
-          <option value="scoot_banlieue_proche">🛵 Scoot Petite Couronne (50cc)</option>
-          <option value="scoot_banlieue_loin">🛵 Scoot Grande Couronne (125cc+)</option>
-          <option value="longue_distance">🚗 Longue Distance</option>
+          <option value="scoot_50">🛵 Scoot Paris (50cc)</option>
+          <option value="scoot_50">🛵 Scoot Petite Couronne (50cc)</option>
+          <option value="scoot_125">🛵 Scoot Grande Couronne (125cc+)</option>
+          <option value="voiture">🚗 Longue Distance</option>
           <option value="fourgon">🚐 Fourgon</option>
         </select>
       </div>
@@ -747,7 +747,7 @@ function renderFleetTable(couriers) {
     const pct = Math.round(c.current_load / c.max_load * 100);
     const barColor = pct >= 100 ? 'bg-red-400' : pct > 60 ? 'bg-yellow-400' : 'bg-green-400';
     const saturated = pct >= 100;
-    const vLabel = { scoot_ville:'🛵 Paris', scoot_banlieue_proche:'🛵 PC', scoot_banlieue_loin:'🛵 GC', longue_distance:'🚗 LD', fourgon:'🚐 Fourgon' }[c.vehicle_type] || c.vehicle_type;
+    const vLabel = { scoot_50:'🛵 Paris', scoot_50:'🛵 PC', scoot_125:'🛵 GC', voiture:'🚗 LD', fourgon:'🚐 Fourgon' }[c.vehicle_type] || c.vehicle_type;
     const statutHtml = saturated
       ? `<span class="badge-saturated px-2 py-0.5 rounded-full text-xs font-semibold">🔴 Saturé</span>`
       : c.is_active

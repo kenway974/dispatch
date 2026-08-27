@@ -86,6 +86,15 @@ class Coursier(BaseModel):
         description="D'où vient cette position : saisie du dispatcheur ou GPS du coursier",
     )
 
+    autonomie_etendue: bool = Field(
+        default=False,
+        description=(
+            "Il emporte des batteries de rechange et accepte la Grande Couronne. "
+            "C'est une caractéristique du coursier, pas de sa machine : deux 125 "
+            "identiques n'ont pas le même rayon selon qui les conduit."
+        ),
+    )
+
     debut_pause: Optional[datetime] = Field(
         default=None,
         description="Heure à laquelle il s'arrête pour manger. None = non renseignée.",

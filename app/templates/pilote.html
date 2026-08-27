@@ -317,10 +317,10 @@
         <div>
           <label class="lbl">Véhicule</label>
           <select class="fld" id="m-vehicule">
-            <option value="scoot_ville">Scoot ville</option>
-            <option value="scoot_banlieue_proche" selected>Scoot banlieue proche</option>
-            <option value="scoot_banlieue_loin">Scoot banlieue loin</option>
-            <option value="longue_distance">Longue distance</option>
+            <option value="scoot_50">Scoot ville</option>
+            <option value="scoot_50" selected>Scoot banlieue proche</option>
+            <option value="scoot_125">Scoot banlieue loin</option>
+            <option value="voiture">Longue distance</option>
             <option value="fourgon">Fourgon</option>
           </select>
         </div>
@@ -390,8 +390,8 @@ let carte, coucheCoursiers = [], coucheCourse = [];
 let codeCourseModal = null;
 
 const LIBELLE_VEHICULE = {
-  scoot_ville:'Scoot ville', scoot_banlieue_proche:'Scoot proche',
-  scoot_banlieue_loin:'Scoot loin', longue_distance:'Longue distance', fourgon:'Fourgon'
+  scoot_50:'Scoot ville', scoot_50:'Scoot proche',
+  scoot_125:'Scoot loin', voiture:'Longue distance', fourgon:'Fourgon'
 };
 
 document.addEventListener('DOMContentLoaded', () => {

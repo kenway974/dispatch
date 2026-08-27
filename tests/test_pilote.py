@@ -68,11 +68,19 @@ def make_order(
 
 @pytest.fixture
 def flotte() -> FleetManager:
-    """Trois coursiers : un tout proche, un plus loin, un hors zone."""
+    """
+    Trois coursiers : deux dans Paris, un hors service.
+
+    Depuis que la flotte est décrite telle qu'elle est, aucun véhicule n'est
+    exclu de Paris — il faut donc une autre cause d'inéligibilité pour couvrir
+    ce cas. Le hors service est la plus courante sur le terrain.
+    """
     fleet = FleetManager()
-    fleet.add_coursier(make_coursier("KEN", VehicleType.SCOOT_VILLE, PARIS_CENTRE))
-    fleet.add_coursier(make_coursier("MEH", VehicleType.SCOOT_VILLE, MONTMARTRE))
-    fleet.add_coursier(make_coursier("LAH", VehicleType.SCOOT_BANLIEUE_LOIN, VERSAILLES))
+    fleet.add_coursier(make_coursier("KEN", VehicleType.SCOOT_50, PARIS_CENTRE))
+    fleet.add_coursier(make_coursier("MEH", VehicleType.SCOOT_50, MONTMARTRE))
+    lah = make_coursier("LAH", VehicleType.SCOOT_125, VERSAILLES)
+    lah.is_active = False
+    fleet.add_coursier(lah)
     return fleet
 
 
@@ -90,12 +98,12 @@ class TestClassement:
         assert eligibles[0].score < eligibles[1].score
 
     def test_ecartes_portent_leur_motif(self, comparaison, flotte) -> None:
-        """LAH ne couvre pas Paris : il doit apparaître, écarté, avec la raison."""
+        """LAH a rendu son scooter : il doit apparaître, écarté, avec la raison."""
         classement = comparaison.classer_coursiers(make_order(), flotte)
         lah = next(c for c in classement if c.code == "LAH")
         assert lah.eligible is False
         assert lah.rang is None
-        assert "hors périmètre" in lah.motif_inegibilite
+        assert "Hors service" in lah.motif_inegibilite
 
     def test_toute_la_flotte_est_representee(self, comparaison, flotte) -> None:
         classement = comparaison.classer_coursiers(make_order(), flotte)
@@ -134,7 +142,7 @@ class TestComparaison:
         res = comparaison.comparer(make_order(), flotte, choix_manuel="LAH")
         assert res.accord is False
         assert res.rang_manuel is None
-        assert "hors périmètre" in res.verdict
+        assert "Hors service" in res.verdict
 
     def test_code_manuel_insensible_a_la_casse(self, comparaison, flotte) -> None:
         res = comparaison.comparer(make_order(), flotte, choix_manuel="ken")
@@ -149,7 +157,7 @@ class TestComparaison:
 
     def test_aucun_eligible(self, comparaison) -> None:
         fleet = FleetManager()
-        fleet.add_coursier(make_coursier("KEN", VehicleType.SCOOT_VILLE, PARIS_CENTRE))
+        fleet.add_coursier(make_coursier("KEN", VehicleType.SCOOT_50, PARIS_CENTRE))
         res = comparaison.comparer(make_order(volume=VolumeType.VOITURE), fleet, choix_manuel="KEN")
         assert res.choix_app is None
         assert res.accord is False
@@ -253,7 +261,7 @@ class TestPersistanceFlotte:
     def test_callback_declenche_sur_mutation(self, flotte) -> None:
         appels = []
         flotte.set_on_change(lambda f: appels.append(f.coursier_count))
-        flotte.add_coursier(make_coursier("NEW", VehicleType.SCOOT_VILLE, BASTILLE))
+        flotte.add_coursier(make_coursier("NEW", VehicleType.SCOOT_50, BASTILLE))
         assert appels == [4]
 
     def test_panne_de_sauvegarde_ne_bloque_pas_le_dispatch(self, flotte) -> None:
@@ -261,7 +269,7 @@ class TestPersistanceFlotte:
         def casse(_):
             raise OSError("disque plein")
         flotte.set_on_change(casse)
-        flotte.add_coursier(make_coursier("NEW", VehicleType.SCOOT_VILLE, BASTILLE))
+        flotte.add_coursier(make_coursier("NEW", VehicleType.SCOOT_50, BASTILLE))
         assert flotte.get_coursier("NEW") is not None
 
 
@@ -295,7 +303,7 @@ CORPS_COURSE = {
 }
 
 
-def _ajouter(client, code, vehicule="scoot_ville", lat=48.8566, lon=2.3522):
+def _ajouter(client, code, vehicule="scoot_50", lat=48.8566, lon=2.3522):
     return client.post("/coursiers", json={"code": code, "vehicle_type": vehicule, "lat": lat, "lon": lon})
 
 

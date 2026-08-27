@@ -24,7 +24,7 @@ NATION       = GpsPosition(lat=48.8483, lon=2.3958)   # ~3.2 km à l'est
 
 
 def coursier(
-    vehicule: VehicleType = VehicleType.SCOOT_VILLE,
+    vehicule: VehicleType = VehicleType.SCOOT_50,
     position: GpsPosition = PARIS_CENTRE,
     source: PositionSource = PositionSource.GPS,
     age_minutes: float = 0.0,
@@ -89,12 +89,12 @@ class TestEstimation:
     def test_la_distance_projetee_suit_la_vitesse_du_vehicule(self) -> None:
         """Six minutes à 18 km/h font 1,8 km — la projection doit s'y tenir."""
         c = coursier(age_minutes=6, courses=[course(MONTMARTRE, NATION)])
-        attendu = VITESSE_MOYENNE_KMH[VehicleType.SCOOT_VILLE] * (6 / 60)
+        attendu = VITESSE_MOYENNE_KMH[VehicleType.SCOOT_50] * (6 / 60)
         assert estimer_position(c).distance_parcourue_km == pytest.approx(attendu, rel=0.02)
 
     def test_un_fourgon_avance_moins_vite_qu_un_scooter(self) -> None:
         trajet = [course(MONTMARTRE, NATION)]
-        scooter = estimer_position(coursier(VehicleType.SCOOT_VILLE, age_minutes=8, courses=trajet))
+        scooter = estimer_position(coursier(VehicleType.SCOOT_50, age_minutes=8, courses=trajet))
         fourgon = estimer_position(coursier(VehicleType.FOURGON, age_minutes=8, courses=trajet))
         assert fourgon.distance_parcourue_km < scooter.distance_parcourue_km
 
@@ -188,7 +188,7 @@ def client(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     with TestClient(main_module.app) as c:
         c.post("/demo/reset")
-        c.post("/coursiers", json={"code": "KEN", "vehicle_type": "scoot_ville",
+        c.post("/coursiers", json={"code": "KEN", "vehicle_type": "scoot_50",
                                    "lat": 48.8566, "lon": 2.3522})
         yield c
 

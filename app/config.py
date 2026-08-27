@@ -18,33 +18,36 @@ VOLUME_WEIGHTS: dict[VolumeType, int] = {
 # Capacité maximale par type de véhicule (en unités de charge)
 #
 #   scooters        → 5  (ex: 5 Standard  OU  2 Volume + 1 Standard)
-#   longue_distance → 8  (véhicule adapté aux gros volumes sur route)
+#   voiture → 8  (véhicule adapté aux gros volumes sur route)
 #   fourgon         → 10 (seul à pouvoir porter un Voiture = 5 unités)
 # ---------------------------------------------------------------------------
 MAX_LOAD_BY_VEHICLE: dict[VehicleType, int] = {
-    VehicleType.SCOOT_VILLE:            5,
-    VehicleType.SCOOT_BANLIEUE_PROCHE:  5,
-    VehicleType.SCOOT_BANLIEUE_LOIN:    5,
-    VehicleType.LONGUE_DISTANCE:        8,
-    VehicleType.FOURGON:               10,
+    VehicleType.SCOOT_50:   5,
+    VehicleType.SCOOT_125:  5,
+    VehicleType.VOITURE:    8,
+    VehicleType.FOURGON:   10,
 }
 
 # ---------------------------------------------------------------------------
 # Zones autorisées par type de véhicule
 #
-#   scoot_ville            → Paris seulement (50cc, pas de voies rapides)
-#   scoot_banlieue_proche  → Paris + Petite Couronne (50cc, PAS de Grande Couronne)
-#   scoot_banlieue_loin    → Petite Couronne + Grande Couronne (125cc+, voies rapides OK)
-#   longue_distance        → Toutes zones (spécialisé inter-villes / aéroports)
+#   scoot_50            → Paris seulement (50cc, pas de voies rapides)
+#   scoot_50  → Paris + Petite Couronne (50cc, PAS de Grande Couronne)
+#   scoot_125    → Petite Couronne + Grande Couronne (125cc+, voies rapides OK)
+#   voiture        → Toutes zones (spécialisé inter-villes / aéroports)
 #   fourgon                → Toutes zones (seul à pouvoir livrer les colis Voiture)
 # ---------------------------------------------------------------------------
 ELIGIBLE_ZONES_BY_VEHICLE: dict[VehicleType, list[Zone]] = {
-    VehicleType.SCOOT_VILLE:           [Zone.PARIS],
-    VehicleType.SCOOT_BANLIEUE_PROCHE: [Zone.PARIS, Zone.PETITE_COURONNE],
-    VehicleType.SCOOT_BANLIEUE_LOIN:   [Zone.PETITE_COURONNE, Zone.GRANDE_COURONNE],
-    VehicleType.LONGUE_DISTANCE:       [Zone.PARIS, Zone.PETITE_COURONNE, Zone.GRANDE_COURONNE],
-    VehicleType.FOURGON:               [Zone.PARIS, Zone.PETITE_COURONNE, Zone.GRANDE_COURONNE],
+    VehicleType.SCOOT_50:  [Zone.PARIS, Zone.PETITE_COURONNE],
+    VehicleType.SCOOT_125: [Zone.PARIS, Zone.PETITE_COURONNE],
+    VehicleType.VOITURE:   [Zone.PARIS, Zone.PETITE_COURONNE, Zone.GRANDE_COURONNE],
+    VehicleType.FOURGON:   [Zone.PARIS, Zone.PETITE_COURONNE, Zone.GRANDE_COURONNE],
 }
+
+# La Grande Couronne n'est pas fermée aux scooters : elle est ouverte à ceux qui
+# ont l'autonomie pour. Un 125 avec des batteries de rechange y va, un 50 non.
+# L'attribut se porte sur le coursier (`autonomie_etendue`), pas sur le véhicule.
+VEHICULES_AUTONOMIE_ETENDUE_POSSIBLE: set[VehicleType] = {VehicleType.SCOOT_125}
 
 # ---------------------------------------------------------------------------
 # Paramètres de scoring de base
@@ -65,13 +68,14 @@ GROUPAGE_PROXIMITY_KM: float = 2.0
 # (permettent la flexibilité sans exclure les véhicules non-idéaux)
 # ---------------------------------------------------------------------------
 
-# scoot_banlieue_loin en Petite Couronne : hors zone principale, légère pénalité
-# → les scoot_banlieue_proche restent prioritaires sur PC
-SCOOT_LOIN_IN_PC_PENALTY_KM: float = 2.0
+# Un 50 en Petite Couronne : accepté, mais on préfère y envoyer un 125.
+# Pénalité volontairement légère — s'il est le mieux placé ou déjà sur sa
+# tournée, il y va quand même.
+SCOOT_50_EN_PETITE_COURONNE_PENALITE_KM: float = 1.5
 
-# longue_distance sur trajet court : les scooters sont plus adaptés et moins coûteux
-LONG_TRIP_MIN_KM: float = 25.0                         # seuil en km
-LONGUE_DISTANCE_SHORT_TRIP_PENALTY_KM: float = 10.0   # pénalité si trajet < seuil
+# Voiture sur trajet court : un scooter passe mieux dans Paris.
+LONG_TRIP_MIN_KM: float = 25.0
+VOITURE_SHORT_TRIP_PENALTY_KM: float = 4.0   # pénalité si trajet < seuil
 
 # fourgon sur petit volume ET court trajet : gaspillage, préférer les scooters
 FOURGON_SMALL_TRIP_MAX_KM: float = 15.0               # seuil en km
@@ -83,7 +87,7 @@ FOURGON_SMALL_TRIP_PENALTY_KM: float = 6.0            # pénalité si conditions
 
 # Facteur appliqué aux pénalités de sous-optimalité pour les commandes premium
 # 0.4 → les pénalités sont réduites à 40 % de leur valeur normale
-# Concrètement : fourgon / longue_distance hésitent moins à prendre une course premium
+# Concrètement : fourgon / voiture hésitent moins à prendre une course premium
 PREMIUM_PENALTY_FACTOR: float = 0.4
 
 # ---------------------------------------------------------------------------
@@ -102,11 +106,10 @@ URGENCY_LOAD_PENALTY_MIN_FACTOR: float = 0.1
 # les arrêts, les feux et le stationnement, elle est donc bien inférieure à la
 # vitesse de pointe du véhicule.
 VITESSE_MOYENNE_KMH: dict[VehicleType, float] = {
-    VehicleType.SCOOT_VILLE:           18.0,   # Paris intra-muros, circulation dense
-    VehicleType.SCOOT_BANLIEUE_PROCHE: 20.0,
-    VehicleType.SCOOT_BANLIEUE_LOIN:   28.0,   # 125cc, voies rapides accessibles
-    VehicleType.LONGUE_DISTANCE:       45.0,   # inter-villes, autoroute
-    VehicleType.FOURGON:               14.0,   # gabarit + stationnement difficile
+    VehicleType.SCOOT_50:  18.0,   # bridé, circulation dense
+    VehicleType.SCOOT_125: 24.0,   # voies rapides accessibles
+    VehicleType.VOITURE:   20.0,
+    VehicleType.FOURGON:   14.0,   # gabarit + stationnement difficile
 }
 
 # Au-delà de ce délai sans signal, la position est signalée comme périmée.
@@ -215,3 +218,19 @@ DISTANCE_PASSATION_MAX_KM: float = 0.4
 # En dessous, la manipulation coûte plus de temps à deux personnes qu'elle n'en
 # fait gagner.
 GAIN_MINIMUM_ECHANGE_KM: float = 3.0
+
+
+# ---------------------------------------------------------------------------
+# Le temps qui ne se voit pas sur la carte
+# ---------------------------------------------------------------------------
+
+# Minutes passées à chaque arrêt : trouver la porte, monter, attendre à
+# l'accueil, faire signer. Six étages sans ascenseur coûtent bien davantage,
+# mais c'est une moyenne — l'historique QuickDriver permettra de la caler,
+# puisque le coursier valide au moment RÉEL du ramassage et de la livraison.
+MINUTES_PAR_ARRET: float = 3.0
+
+# Marge appliquée aux temps de trajet estimés. Un itinéraire annoncé à 24
+# minutes n'en fait jamais 24 : rue barrée, manifestation, livraison en double
+# file devant. On prévoit large plutôt que de promettre juste.
+MARGE_TRAJET: float = 1.25

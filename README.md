@@ -116,9 +116,9 @@ Chaque coursier possède un véhicule adapté à une zone précise. **Un scooter
 
 | Type de véhicule | Zone autorisée | Peut porter |
 |---|---|---|
-| `scoot_ville` | Paris intra-muros uniquement | Standard, Volume |
-| `scoot_banlieue_proche` | Petite Couronne uniquement | Standard, Volume |
-| `scoot_banlieue_loin` | Grande Couronne uniquement | Standard, Volume |
+| `scoot_50` | Paris intra-muros uniquement | Standard, Volume |
+| `scoot_50` | Petite Couronne uniquement | Standard, Volume |
+| `scoot_125` | Grande Couronne uniquement | Standard, Volume |
 | `fourgon` | Grande Couronne + **Voiture toutes zones** | Standard, Volume, Voiture |
 
 > **Règle fourgon** : Un colis de type `Voiture` (très volumineux) ne peut être transporté que par un fourgon, et ce **quelle que soit la zone**. Si un client parisien commande un colis Voiture, le fourgon de Grande Couronne peut se déplacer pour le prendre.
@@ -272,7 +272,7 @@ curl -X POST http://localhost:8000/coursiers \
   -H "Content-Type: application/json" \
   -d '{
     "code": "KEN",
-    "vehicle_type": "scoot_ville",
+    "vehicle_type": "scoot_50",
     "lat": 48.8566,
     "lon": 2.3522
   }'
@@ -281,7 +281,7 @@ curl -X POST http://localhost:8000/coursiers \
 ```json
 {
   "code": "KEN",
-  "vehicle_type": "scoot_ville",
+  "vehicle_type": "scoot_50",
   "lat": 48.8566,
   "lon": 2.3522,
   "is_active": true,
@@ -293,7 +293,7 @@ curl -X POST http://localhost:8000/coursiers \
 }
 ```
 
-**Valeurs acceptées pour `vehicle_type` :** `scoot_ville` · `scoot_banlieue_proche` · `scoot_banlieue_loin` · `fourgon`
+**Valeurs acceptées pour `vehicle_type` :** `scoot_50` · `scoot_50` · `scoot_125` · `fourgon`
 
 ---
 
@@ -585,8 +585,8 @@ tests/test_dispatch.py::TestGeo::test_haversine_same_point          PASSED
 tests/test_dispatch.py::TestGeo::test_haversine_paris_montmartre     PASSED
 tests/test_dispatch.py::TestGeo::test_haversine_symmetry             PASSED
 tests/test_dispatch.py::TestGeo::test_min_distance_to_route_nearby   PASSED
-tests/test_dispatch.py::TestEligibility::test_scoot_ville_eligible_for_paris              PASSED
-tests/test_dispatch.py::TestEligibility::test_scoot_ville_not_eligible_for_petite_couronne PASSED
+tests/test_dispatch.py::TestEligibility::test_scoot_50_eligible_for_paris              PASSED
+tests/test_dispatch.py::TestEligibility::test_scoot_50_not_eligible_for_petite_couronne PASSED
 tests/test_dispatch.py::TestEligibility::test_fourgon_eligible_for_voiture_any_zone       PASSED
 tests/test_dispatch.py::TestEligibility::test_courier_at_capacity_not_eligible            PASSED
 tests/test_dispatch.py::TestEligibility::test_volume_colis_fits_remaining_capacity        PASSED
@@ -631,9 +631,9 @@ VOLUME_WEIGHTS = {
 
 # Capacité max par type de véhicule
 MAX_LOAD_BY_VEHICLE = {
-    VehicleType.SCOOT_VILLE:            5,
-    VehicleType.SCOOT_BANLIEUE_PROCHE:  5,
-    VehicleType.SCOOT_BANLIEUE_LOIN:    5,
+    VehicleType.SCOOT_50:            5,
+    VehicleType.SCOOT_50:  5,
+    VehicleType.SCOOT_125:    5,
     VehicleType.FOURGON:               10,
 }
 
@@ -661,12 +661,12 @@ python scripts/seed_fleet.py
 Connexion à http://localhost:8000...
 API en ligne. Flotte actuelle : 0 coursier(s).
 
-  ✓ KEN (scoot_ville)             — Paris centre (Île de la Cité)
-  ✓ THO (scoot_ville)             — Montmartre
-  ✓ ALI (scoot_ville)             — Bastille
-  ✓ MAR (scoot_banlieue_proche)   — Saint-Denis
-  ✓ LEA (scoot_banlieue_proche)   — Aubervilliers
-  ✓ SAM (scoot_banlieue_loin)     — Sarcelles
+  ✓ KEN (scoot_50)             — Paris centre (Île de la Cité)
+  ✓ THO (scoot_50)             — Montmartre
+  ✓ ALI (scoot_50)             — Bastille
+  ✓ MAR (scoot_50)   — Saint-Denis
+  ✓ LEA (scoot_50)   — Aubervilliers
+  ✓ SAM (scoot_125)     — Sarcelles
   ✓ FOU (fourgon)                 — Versailles
   ✓ MAX (fourgon)                 — Créteil
 

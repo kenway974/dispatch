@@ -144,3 +144,64 @@ def proposer_echanges(
 
     propositions.sort(key=lambda e: -e.gain_km)
     return propositions
+
+
+@dataclass
+class Transfert:
+    """Une course déplacée d'office, parce que son porteur ne peut plus rouler."""
+    order_id: str
+    porteur: str
+    repreneur: str
+    score_repreneur: float
+
+
+def delester_coursier(fleet: FleetManager, code: str) -> list[Transfert]:
+    """
+    Vide le portefeuille d'un coursier immobilisé et le met hors service.
+
+    Crevaison, panne, malaise : il appelle le dispatch, et on répartit ses
+    courses sur les collègues proches ou peu chargés. Deux différences avec une
+    passation ordinaire :
+
+    - **le collègue se déplace**, donc on n'exige pas qu'ils soient déjà côte à
+      côte ; c'est tout l'inverse d'un colis qu'on se passe en se croisant ;
+    - **la flotte est réellement modifiée**, pas seulement conseillée. Le
+      coursier est en panne : il n'y a rien à proposer, il faut agir.
+
+    Les courses sont traitées une par une, la flotte étant remise à jour entre
+    chaque : sans cela on empilerait tout le portefeuille sur le même collègue
+    sans jamais voir sa charge monter.
+
+    Returns:
+        Les transferts effectués. Une course sans repreneur éligible n'y figure
+        pas — elle reste attribuée au coursier en panne, à traiter à la main.
+    """
+    en_panne = fleet.get_coursier(code)
+    if en_panne is None:
+        return []
+
+    transferts: list[Transfert] = []
+
+    for embarquee in list(en_panne.assigned_orders):
+        order = fleet.get_order(embarquee.order_id)
+        if order is None:
+            continue
+
+        candidats = [
+            c for c in fleet.list_coursiers()
+            if c.code != en_panne.code and motif_inegibilite(c, order) is None
+        ]
+        if not candidats:
+            continue
+
+        repreneur = min(candidats, key=lambda c: score_detail(c, order, fleet).total)
+        score = score_detail(repreneur, order, fleet).total
+
+        fleet.remove_order_from_coursier(order.id, en_panne.code)
+        fleet.assign_order_to_coursier(
+            order, repreneur.code, ramassage_effectue=embarquee.ramassage_effectue
+        )
+        transferts.append(Transfert(order.id, en_panne.code, repreneur.code, score))
+
+    fleet.set_coursier_active(en_panne.code, False)
+    return transferts

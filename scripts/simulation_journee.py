@@ -126,9 +126,10 @@ class Service:
     code: str
     vehicule: VehicleType
     base: str
-    debut: int          # minutes depuis minuit
-    fin: int
-    pause: tuple[int, int] | None   # (début, fin) ou None si le coursier n'en prend pas
+    autonomie_etendue: bool = False
+    debut: int = 0       # minutes depuis minuit
+    fin: int = 0
+    pause: tuple[int, int] | None = None   # (début, fin) ou None si le coursier n'en prend pas
 
     def en_service(self, t: int) -> bool:
         if not (self.debut <= t < self.fin):
@@ -139,15 +140,16 @@ class Service:
 
 
 SERVICES = [
-    # 8 h de travail chacun, à l'intérieur de l'amplitude 08:30 – 19:30
-    Service("KEN", VehicleType.SCOOT_BANLIEUE_PROCHE, "Bastille (11e)",        8 * 60 + 30, 17 * 60 + 30, (12 * 60 + 30, 13 * 60 + 30)),
-    Service("MEH", VehicleType.SCOOT_BANLIEUE_PROCHE, "Montmartre (18e)",      8 * 60 + 30, 17 * 60 + 30, (13 * 60, 14 * 60)),
-    Service("LIM", VehicleType.SCOOT_VILLE,           "Montparnasse (14e)",    9 * 60,      17 * 60,      None),
-    Service("MIC", VehicleType.SCOOT_BANLIEUE_PROCHE, "Bureau Lungta (17e)",   9 * 60 + 30, 18 * 60 + 30, (13 * 60 + 30, 14 * 60 + 30)),
-    Service("JC",  VehicleType.SCOOT_BANLIEUE_LOIN,   "Saint-Denis (93)",      8 * 60 + 30, 17 * 60 + 30, (12 * 60, 13 * 60)),
-    Service("MEF", VehicleType.SCOOT_BANLIEUE_LOIN,   "Créteil (94)",         10 * 60 + 30, 19 * 60 + 30, (14 * 60, 15 * 60)),
-    Service("LAH", VehicleType.FOURGON,               "Vitry (94)",            9 * 60,      18 * 60,      (13 * 60, 14 * 60)),
-    Service("SET", VehicleType.LONGUE_DISTANCE,       "Orly (91)",            10 * 60 + 30, 18 * 60 + 30, None),
+    # 8 h de travail chacun, dans l'amplitude 08:30 – 19:30.
+    # Deux 125 emportent des batteries de rechange : eux seuls font la Grande Couronne.
+    Service("KEN", VehicleType.SCOOT_50,  "Bastille (11e)",       False,  8 * 60 + 30, 17 * 60 + 30, (12 * 60 + 30, 13 * 60 + 30)),
+    Service("MEH", VehicleType.SCOOT_50,  "Montmartre (18e)",     False,  8 * 60 + 30, 17 * 60 + 30, (13 * 60, 14 * 60)),
+    Service("LIM", VehicleType.SCOOT_50,  "Montparnasse (14e)",   False,  9 * 60,      17 * 60,      None),
+    Service("MIC", VehicleType.SCOOT_125, "Bureau Lungta (17e)",  False,  9 * 60 + 30, 18 * 60 + 30, (13 * 60 + 30, 14 * 60 + 30)),
+    Service("JC",  VehicleType.SCOOT_125, "Saint-Denis (93)",     True,   8 * 60 + 30, 17 * 60 + 30, (12 * 60, 13 * 60)),
+    Service("MEF", VehicleType.SCOOT_125, "Créteil (94)",         True,  10 * 60 + 30, 19 * 60 + 30, (14 * 60, 15 * 60)),
+    Service("LAH", VehicleType.FOURGON,   "Vitry (94)",           False,  9 * 60,      18 * 60,      (13 * 60, 14 * 60)),
+    Service("SET", VehicleType.VOITURE,   "Orly (91)",            False, 10 * 60 + 30, 18 * 60 + 30, None),
 ]
 
 
@@ -286,6 +288,7 @@ def simuler(nb_courses: int, graine: int) -> dict:
             code=service.code,
             vehicle_type=service.vehicule,
             position=position(service.base),
+            autonomie_etendue=service.autonomie_etendue,
             is_active=service.en_service(OUVERTURE),
         ))
 

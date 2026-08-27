@@ -88,7 +88,7 @@ class TestRogerEtKarim:
         fleet = FleetManager()
 
         roger = Coursier(
-            code="ROG", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=MADELEINE,
+            code="ROG", vehicle_type=VehicleType.SCOOT_50, position=MADELEINE,
             assigned_orders=[
                 # Déjà ramassée dans le 16e : il ne lui reste que la livraison
                 course_portee("ROG-16-4", SEIZIEME, QUATRIEME, ramassage_effectue=True),
@@ -97,7 +97,7 @@ class TestRogerEtKarim:
             ],
         )
         karim = Coursier(
-            code="KAR", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=SAINT_GERMAIN,
+            code="KAR", vehicle_type=VehicleType.SCOOT_50, position=SAINT_GERMAIN,
             assigned_orders=[
                 course_portee(f"KAR-13-{i}", HUITIEME, TREIZIEME, ramassage_effectue=True)
                 for i in range(3)
@@ -183,7 +183,7 @@ class TestRamassageDejaFait:
 
     def _roger(self, ramassage_effectue: bool) -> Coursier:
         return Coursier(
-            code="ROG", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=MADELEINE,
+            code="ROG", vehicle_type=VehicleType.SCOOT_50, position=MADELEINE,
             assigned_orders=[course_portee("A", SEIZIEME, QUATRIEME, ramassage_effectue)],
         )
 
@@ -251,11 +251,11 @@ class TestPauseImminente:
         fleet = FleetManager()
 
         kenny = Coursier(
-            code="KEN", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=BUREAU,
+            code="KEN", vehicle_type=VehicleType.SCOOT_50, position=BUREAU,
             debut_pause=maintenant + timedelta(minutes=minutes_avant_pause),
         )
         collegue = Coursier(
-            code="COL", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=BUREAU,
+            code="COL", vehicle_type=VehicleType.SCOOT_50, position=BUREAU,
         )
         fleet.add_coursier(kenny)
         fleet.add_coursier(collegue)
@@ -291,7 +291,7 @@ class TestPauseImminente:
         """Tant que le dispatcheur n'a pas saisi les horaires, la règle dort."""
         from app.services.dispatch import score_detail
         fleet = FleetManager()
-        libre = Coursier(code="LIB", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=BUREAU)
+        libre = Coursier(code="LIB", vehicle_type=VehicleType.SCOOT_50, position=BUREAU)
         fleet.add_coursier(libre)
         detail = score_detail(libre, commande("C", DIX_SEPTIEME, DEUXIEME), fleet)
         assert detail.penalite_debordement == 0.0
@@ -320,7 +320,7 @@ class TestReattribution:
         fleet = FleetManager()
 
         kenny = Coursier(
-            code="KEN", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE, position=BUREAU,
+            code="KEN", vehicle_type=VehicleType.SCOOT_50, position=BUREAU,
             debut_pause=maintenant + timedelta(minutes=minutes_avant_pause),
             assigned_orders=[
                 course_portee("C17-2", DIX_SEPTIEME, DEUXIEME, ramassage_effectue=True)
@@ -328,7 +328,7 @@ class TestReattribution:
         )
         # ~0,009° de latitude ≈ 1 km
         collegue = Coursier(
-            code="COL", vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE,
+            code="COL", vehicle_type=VehicleType.SCOOT_50,
             position=GpsPosition(lat=BUREAU.lat + distance_collegue_km * 0.009, lon=BUREAU.lon),
         )
         fleet.add_coursier(kenny)
@@ -378,3 +378,132 @@ class TestReattribution:
         """Se passer un colis coûte du temps à deux personnes : il faut que ça vaille le coup."""
         from app.services.reattribution import proposer_echanges
         assert proposer_echanges(self._situation(), gain_minimum_km=999) == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Situation 3 — la crevaison
+# ═══════════════════════════════════════════════════════════════════════════
+
+CONCORDE_S3 = GpsPosition(lat=48.8656, lon=2.3212)
+
+
+class TestCoursierImmobilise:
+    """
+    « J'ai crevé et j'ai quatre courses sur moi. J'appelle le dispatch pour
+    prévenir, et ensuite on s'arrange avec un collègue qui est proche ou un
+    collègue qui n'a pas beaucoup de courses. »
+
+    Différence avec une passation ordinaire : le collègue vient à lui. La
+    contrainte « à portée de bras » ne tient plus, et c'est tout le portefeuille
+    qui part, pas une course.
+    """
+
+    def _flotte_avec_panne(self):
+        fleet = FleetManager()
+        panne = Coursier(
+            code="PAN", vehicle_type=VehicleType.SCOOT_50, position=CONCORDE_S3,
+            assigned_orders=[
+                course_portee(f"P{i}", CONCORDE_S3, DEUXIEME, ramassage_effectue=True)
+                for i in range(4)
+            ],
+        )
+        proche = Coursier(code="PRO", vehicle_type=VehicleType.SCOOT_50,
+                          position=GpsPosition(lat=48.8700, lon=2.3300))
+        charge = Coursier(
+            code="CHA", vehicle_type=VehicleType.SCOOT_50, position=CONCORDE_S3,
+            assigned_orders=[
+                course_portee(f"C{i}", CONCORDE_S3, DEUXIEME, ramassage_effectue=True)
+                for i in range(4)
+            ],
+        )
+        for c in (panne, proche, charge):
+            fleet.add_coursier(c)
+        for i in range(4):
+            fleet.add_order(commande(f"P{i}", CONCORDE_S3, DEUXIEME))
+            fleet.add_order(commande(f"C{i}", CONCORDE_S3, DEUXIEME))
+        return fleet
+
+    def test_tout_le_portefeuille_est_redistribue(self) -> None:
+        from app.services.reattribution import delester_coursier
+        transferts = delester_coursier(self._flotte_avec_panne(), "PAN")
+        assert len(transferts) == 4
+
+    def test_le_collegue_le_moins_charge_prend_le_gros(self) -> None:
+        """
+        « un collègue qui est proche ou un collègue qui n'a pas beaucoup de courses »
+
+        Pas tout sur le même : la charge du repreneur monte au fur et à mesure,
+        et à partir d'un certain point un autre devient meilleur. C'est voulu —
+        déverser quatre courses sur un seul dos ne ferait que déplacer le problème.
+        """
+        from app.services.reattribution import delester_coursier
+        transferts = delester_coursier(self._flotte_avec_panne(), "PAN")
+        repris_par_le_libre = sum(1 for t in transferts if t.repreneur == "PRO")
+        assert repris_par_le_libre > len(transferts) / 2
+
+    def test_la_flotte_est_reellement_mise_a_jour(self) -> None:
+        """Ce n'est pas une proposition : le coursier est en panne, il faut agir."""
+        from app.services.reattribution import delester_coursier
+        fleet = self._flotte_avec_panne()
+        delester_coursier(fleet, "PAN")
+        assert fleet.get_coursier("PAN").order_count == 0
+        assert fleet.get_coursier("PRO").order_count + fleet.get_coursier("CHA").order_count == 8
+
+    def test_le_coursier_en_panne_est_mis_hors_service(self) -> None:
+        from app.services.reattribution import delester_coursier
+        fleet = self._flotte_avec_panne()
+        delester_coursier(fleet, "PAN")
+        assert fleet.get_coursier("PAN").is_active is False
+
+    def test_la_distance_ne_bloque_pas_le_delestage(self) -> None:
+        """Le collègue se déplace : on n'exige pas qu'ils soient déjà côte à côte."""
+        from app.services.reattribution import delester_coursier
+        fleet = self._flotte_avec_panne()
+        fleet.update_coursier_position("PRO", 48.9360, 2.3553)   # Saint-Denis, loin
+        assert len(delester_coursier(fleet, "PAN")) == 4
+
+
+class TestMemeClientQuiRappelle:
+    """
+    « Le client part de Concorde, je viens ramasser, je suis parti. Une deuxième
+    course arrive. On privilégie le coursier qui a déjà pris la première, s'il
+    n'est pas trop loin du point de ramassage et s'il n'y a pas de
+    contre-indication. »
+    """
+
+    def _flotte(self, distance_parcourue_km: float = 0.5):
+        fleet = FleetManager()
+        # Il a ramassé à Concorde et vient de démarrer
+        parti = Coursier(
+            code="PAR", vehicle_type=VehicleType.SCOOT_50,
+            position=GpsPosition(lat=CONCORDE_S3.lat + distance_parcourue_km * 0.009, lon=CONCORDE_S3.lon),
+            assigned_orders=[course_portee("PREMIERE", CONCORDE_S3, DEUXIEME, ramassage_effectue=True)],
+        )
+        # Un collègue à la même distance du ramassage, mais qui n'y est jamais allé
+        autre = Coursier(
+            code="AUT", vehicle_type=VehicleType.SCOOT_50,
+            position=GpsPosition(lat=CONCORDE_S3.lat - distance_parcourue_km * 0.009, lon=CONCORDE_S3.lon),
+        )
+        fleet.add_coursier(parti)
+        fleet.add_coursier(autre)
+        fleet.add_order(commande("PREMIERE", CONCORDE_S3, DEUXIEME))
+        return fleet, parti, autre
+
+    def test_celui_qui_vient_de_ramasser_la_reprend(self) -> None:
+        fleet, parti, autre = self._flotte()
+        seconde = commande("SECONDE", CONCORDE_S3, DEUXIEME)
+        assert score_coursier(parti, seconde, fleet) < score_coursier(autre, seconde, fleet)
+
+    def test_son_avantage_fond_a_mesure_qu_il_s_eloigne(self) -> None:
+        """
+        « s'il n'est pas trop loin du point de ramassage ».
+
+        Le moteur mesure mieux que la distance : il regarde si le retour au
+        ramassage reste cohérent avec la suite de sa tournée. L'avantage
+        s'érode donc progressivement au lieu de disparaître à un seuil.
+        """
+        fleet_proche, proche, _ = self._flotte(distance_parcourue_km=0.5)
+        fleet_loin, loin, _ = self._flotte(distance_parcourue_km=6)
+        seconde = commande("SECONDE", CONCORDE_S3, DEUXIEME)
+
+        assert score_coursier(proche, seconde, fleet_proche) < score_coursier(loin, seconde, fleet_loin)

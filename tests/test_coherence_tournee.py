@@ -40,7 +40,7 @@ def coursier(code: str, position: GpsPosition, tournee: list[tuple[GpsPosition, 
     """Coursier avec sa tournée en cours, décrite comme une suite (ramassage, livraison)."""
     return Coursier(
         code=code,
-        vehicle_type=VehicleType.SCOOT_BANLIEUE_PROCHE,
+        vehicle_type=VehicleType.SCOOT_50,
         position=position,
         assigned_orders=[
             AssignedOrder(
@@ -231,8 +231,14 @@ class TestProtectionDesUrgences:
         assert detail.motif_retard and "URG-0" in detail.motif_retard
 
     def test_beaucoup_de_marge_aucune_penalite(self) -> None:
+        """
+        Trois heures devant lui : rien à protéger.
+
+        Le seuil a monté depuis que le moteur compte le temps passé sur place et
+        majore les trajets — une tournée dure plus longtemps qu'à vol d'oiseau.
+        """
         from app.services.dispatch import score_detail
-        fleet, c = self._coursier_sous_echeance(90, NEUILLY)
+        fleet, c = self._coursier_sous_echeance(180, NEUILLY)
         detail = score_detail(c, course(NATION, VILLEJUIF, zone=Zone.PETITE_COURONNE), fleet)
         assert detail.penalite_retard == pytest.approx(0.0, abs=0.01)
 
@@ -241,15 +247,23 @@ class TestProtectionDesUrgences:
         from app.services.dispatch import score_detail
         detournante = course(NATION, VILLEJUIF, zone=Zone.PETITE_COURONNE)
         fleet_court, c_court = self._coursier_sous_echeance(30, NEUILLY)
-        fleet_long,  c_long  = self._coursier_sous_echeance(90, NEUILLY)
+        fleet_long,  c_long  = self._coursier_sous_echeance(180, NEUILLY)
         assert score_detail(c_court, detournante, fleet_court).total > \
                score_detail(c_long,  detournante, fleet_long).total
 
-    def test_une_course_sur_son_axe_passe_malgre_la_marge_courte(self) -> None:
+    def test_une_course_sur_son_axe_coute_bien_moins_qu_un_detour(self) -> None:
+        """
+        Marge tout aussi courte. Une course qui suit son axe le retarde à peine ;
+        une course à contresens le fait exploser. C'est l'exception du terrain —
+        on prend au passage, quitte à confier la livraison à un autre.
+        """
         from app.services.dispatch import score_detail
         fleet, c = self._coursier_sous_echeance(30, NEUILLY)
-        detail = score_detail(c, course(STRASBOURG, NEUILLY), fleet)
-        assert detail.penalite_retard == pytest.approx(0.0, abs=0.01)
+
+        sur_l_axe    = score_detail(c, course(STRASBOURG, NEUILLY), fleet)
+        a_contresens = score_detail(c, course(NATION, VILLEJUIF, zone=Zone.PETITE_COURONNE), fleet)
+
+        assert sur_l_axe.penalite_retard < a_contresens.penalite_retard / 3
 
     def test_sans_echeance_aucune_protection_ne_sapplique(self) -> None:
         from app.services.dispatch import score_detail
