@@ -695,3 +695,67 @@ class TestLabelTournee:
             assigned_orders=[course_portee(f"T{i}", DIX_SEPTIEME, DEUXIEME, True) for i in range(5)],
         )
         assert motif_inegibilite(charge, commande("C", DEUXIEME, DEUXIEME)) is not None
+
+
+class TestTourneeDeCompta:
+    """
+    Le lundi, on ramasse la compta dans une dizaine de supermarchés de Paris pour
+    tout livrer à la même adresse dans le 16e.
+
+    Dans QuickDriver ce sont des courses indépendantes, facturées une par une,
+    qui partagent seulement leur destination et leur label de tournée. Le moteur
+    n'a donc rien de spécial à faire — mais il doit quand même les concentrer sur
+    quelques coursiers plutôt que d'en donner une à chacun : celui qui va déjà
+    dans le 16e y porte la deuxième pour presque rien.
+    """
+
+    SUPERMARCHES = [
+        GpsPosition(lat=48.8809, lon=2.3553),   # 10e
+        GpsPosition(lat=48.8483, lon=2.3958),   # 12e
+        GpsPosition(lat=48.8533, lon=2.3692),   # 11e
+        GpsPosition(lat=48.8422, lon=2.3220),   # 14e
+        GpsPosition(lat=48.8709, lon=2.3317),   # 9e
+        GpsPosition(lat=48.8864, lon=2.3432),   # 18e
+        GpsPosition(lat=48.8312, lon=2.3555),   # 13e
+        GpsPosition(lat=48.8583, lon=2.3470),   # 1er
+    ]
+    SEIZIEME = GpsPosition(lat=48.8710, lon=2.2830)
+
+    def _flotte(self) -> FleetManager:
+        fleet = FleetManager()
+        for i, base in enumerate([DIX_SEPTIEME, DEUXIEME, BUREAU, CRETEIL]):
+            fleet.add_coursier(Coursier(
+                code=f"C{i}", vehicle_type=VehicleType.SCOOT_125, position=base,
+            ))
+        return fleet
+
+    def _dispatcher_la_tournee(self):
+        from app.services.comparaison import classer_coursiers
+        fleet = self._flotte()
+        attributions = []
+        for i, depart in enumerate(self.SUPERMARCHES):
+            course = commande(f"CPT{i}", depart, self.SEIZIEME)
+            course.tournee = "compta-lundi-supermarches"
+            retenu = next(c for c in classer_coursiers(course, fleet) if c.eligible)
+            fleet.add_order(course)
+            fleet.assign_order_to_coursier(course, retenu.code)
+            attributions.append(retenu.code)
+        return attributions
+
+    def test_les_courses_se_concentrent_au_lieu_de_s_eparpiller(self) -> None:
+        """Huit courses vers la même adresse ne doivent pas faire huit trajets vers le 16e."""
+        attributions = self._dispatcher_la_tournee()
+        assert len(set(attributions)) <= 3, f"éparpillées sur {set(attributions)}"
+
+    def test_la_capacite_reste_respectee(self) -> None:
+        """La concentration s'arrête à la sacoche : cinq unités, pas plus."""
+        attributions = self._dispatcher_la_tournee()
+        for code in set(attributions):
+            assert attributions.count(code) <= 5
+
+    def test_chaque_course_reste_independante(self) -> None:
+        """
+        Facturées une par une dans QuickDriver : le label groupe, il ne fusionne
+        pas. Huit courses entrent, huit courses sont attribuées.
+        """
+        assert len(self._dispatcher_la_tournee()) == 8
