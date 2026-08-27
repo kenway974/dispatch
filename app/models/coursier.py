@@ -33,6 +33,15 @@ class AssignedOrder(BaseModel):
     delivery_lon: float
     volume_type: VolumeType
 
+    ramassage_effectue: bool = Field(
+        default=False,
+        description=(
+            "Le colis est déjà dans la sacoche. L'itinéraire ne repasse alors plus "
+            "par le point de ramassage — sinon le moteur croit le coursier obligé de "
+            "retraverser Paris pour un colis qu'il a déjà sur lui."
+        ),
+    )
+
     @property
     def weight(self) -> int:
         """Poids en unités de charge de cette commande."""

@@ -169,3 +169,26 @@ MARGE_SECURITE_MINUTES: float = 10.0
 # À réviser dès que l'historique réel sera disponible : ces chiffres sortent
 # d'une journée simulée, pas de la vraie exploitation.
 PENALITE_RETARD_PAR_MINUTE: float = 1.0
+
+
+# ---------------------------------------------------------------------------
+# Ce qu'on porte décide de ce qu'on peut accepter
+#
+# Règle du terrain : ce n'est pas la distance qui autorise un détour, c'est
+# l'urgence de ce qu'on a déjà sur soi. Un coursier à côté du ramassage mais
+# porteur d'une urgence n'est pas le bon choix ; un coursier plus loin qui ne
+# porte que du souple peut remonter sans que ça pose problème.
+# ---------------------------------------------------------------------------
+
+# En dessous de ce temps restant, une course portée compte comme une urgence.
+SEUIL_URGENCE_MINUTES: float = 60.0
+
+# Ajouté au score quand une course urgente est proposée à un coursier qui en
+# porte déjà une. On n'empile pas deux urgences sur le même dos : la deuxième
+# ferait rater la première, ou l'inverse.
+PENALITE_URGENCES_CUMULEES_KM: float = 8.0
+
+# Appliqué au détour d'un coursier qui ne porte aucune urgence. Il est libre de
+# ses mouvements : un crochet lui coûte moins cher qu'à quelqu'un qui court
+# après une échéance.
+FACTEUR_DETOUR_SANS_URGENCE: float = 0.6

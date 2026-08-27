@@ -153,7 +153,9 @@ class FleetManager:
         self._notify()
         return coursier
 
-    def assign_order_to_coursier(self, order: Order, coursier_code: str) -> None:
+    def assign_order_to_coursier(
+        self, order: Order, coursier_code: str, ramassage_effectue: bool = False
+    ) -> None:
         """
         Attribue une commande à un coursier :
         - Ajoute un AssignedOrder dans la liste du coursier
@@ -178,6 +180,7 @@ class FleetManager:
             delivery_lat=order.delivery.lat,
             delivery_lon=order.delivery.lon,
             volume_type=order.volume_type,
+            ramassage_effectue=ramassage_effectue,
         )
         coursier.assigned_orders.append(assigned)
 

@@ -34,10 +34,13 @@ from app.config import (
     LOAD_PENALTY_PER_UNIT,
     LONG_TRIP_MIN_KM,
     LONGUE_DISTANCE_SHORT_TRIP_PENALTY_KM,
+    FACTEUR_DETOUR_SANS_URGENCE,
     MARGE_SECURITE_MINUTES,
     PENALITE_RETARD_PAR_MINUTE,
     MAX_LOAD_BY_VEHICLE,
+    PENALITE_URGENCES_CUMULEES_KM,
     PREMIUM_PENALTY_FACTOR,
+    SEUIL_URGENCE_MINUTES,
     VITESSE_MOYENNE_KMH,
     SCOOT_LOIN_IN_PC_PENALTY_KM,
     URGENCY_LOAD_PENALTY_MIN_FACTOR,
@@ -85,7 +88,8 @@ def arrets_en_cours(coursier: Coursier) -> List[Arret]:
     """
     arrets: List[Arret] = []
     for course in coursier.assigned_orders:
-        arrets.append(Arret(course.pickup_position, course.order_id, est_livraison=False))
+        if not course.ramassage_effectue:
+            arrets.append(Arret(course.pickup_position, course.order_id, est_livraison=False))
         arrets.append(Arret(course.delivery_position, course.order_id, est_livraison=True))
     return arrets
 
@@ -180,6 +184,35 @@ def _vehicle_sub_optimal_penalty(
         penalty += FOURGON_SMALL_TRIP_PENALTY_KM
 
     return penalty * penalty_factor
+
+
+def urgences_a_bord(coursier: Coursier, fleet: "FleetManager | None") -> int:
+    """
+    Nombre de courses pressées que le coursier transporte en ce moment.
+
+    « Pressée » se juge au temps qu'il RESTE, pas au délai annoncé : une course
+    promise en trois heures dont il ne reste que dix minutes est une urgence,
+    une course promise en une heure qui vient d'arriver ne l'est pas encore.
+    """
+    if fleet is None:
+        return 0
+    compte = 0
+    for embarquee in coursier.assigned_orders:
+        commande = fleet.get_order(embarquee.order_id)
+        if commande is None or commande.deadline_minutes is None:
+            continue
+        ecoule = (datetime.now() - commande.created_at).total_seconds() / 60.0
+        if commande.deadline_minutes - ecoule <= SEUIL_URGENCE_MINUTES:
+            compte += 1
+    return compte
+
+
+def course_pressee(order: Order) -> bool:
+    """Vrai si la course à attribuer est elle-même une urgence."""
+    if order.deadline_minutes is None:
+        return False
+    ecoule = (datetime.now() - order.created_at).total_seconds() / 60.0
+    return order.deadline_minutes - ecoule <= SEUIL_URGENCE_MINUTES
 
 
 def penalite_retard_induit(
@@ -329,6 +362,8 @@ class ScoreDetail:
     penalite_vehicule: float  # véhicule non idéal pour cette course
     penalite_retard: float    # retard infligé à une livraison déjà promise
     motif_retard: Optional[str]
+    urgences_portees: int     # combien de courses pressées il transporte déjà
+    penalite_cumul_urgences: float
     trajet_km: float          # ramassage → livraison
     urgence: float            # 0.0 → 1.0
 
@@ -346,6 +381,10 @@ class ScoreDetail:
             lignes.append(f"+{self.penalite_vehicule:.1f} véhicule non idéal")
         if self.penalite_retard > 0.01 and self.motif_retard:
             lignes.append(f"+{self.penalite_retard:.1f} {self.motif_retard}")
+        if self.penalite_cumul_urgences > 0.01:
+            lignes.append(f"+{self.penalite_cumul_urgences:.0f} il court déjà après une urgence")
+        elif self.urgences_portees == 0:
+            lignes.append("libre de toute échéance : un crochet lui coûte moins")
         return lignes
 
 
@@ -387,10 +426,19 @@ def score_detail(coursier: Coursier, order: Order, fleet: "FleetManager | None" 
 
     # 4. Retard infligé aux livraisons déjà promises.
     # Le kilométrage n'est pas le seul coût : faire rater une livraison annoncée
-    # à 15h30 coûte bien davantage que le détour qui l'a provoquée.
+    # coûte bien davantage que le détour qui l'a provoquée.
     retard_penalty, motif_retard = penalite_retard_induit(coursier, order, fleet)
 
-    total = max(0.01, detour + load_penalty + vehicle_penalty + retard_penalty)
+    # 5. Ce qu'il porte décide de ce qu'il peut accepter.
+    # Un coursier libre de toute échéance se détourne volontiers, même de loin.
+    # Un coursier qui court déjà après une urgence ne doit pas en recevoir une
+    # seconde : elles se feraient rater l'une l'autre.
+    pressees = urgences_a_bord(coursier, fleet)
+    if pressees == 0:
+        detour *= FACTEUR_DETOUR_SANS_URGENCE
+    penalite_cumul = PENALITE_URGENCES_CUMULEES_KM if (pressees and course_pressee(order)) else 0.0
+
+    total = max(0.01, detour + load_penalty + vehicle_penalty + retard_penalty + penalite_cumul)
 
     return ScoreDetail(
         total=total,
@@ -400,6 +448,8 @@ def score_detail(coursier: Coursier, order: Order, fleet: "FleetManager | None" 
         penalite_vehicule=vehicle_penalty,
         penalite_retard=retard_penalty,
         motif_retard=motif_retard,
+        urgences_portees=pressees,
+        penalite_cumul_urgences=penalite_cumul,
         trajet_km=trip_km,
         urgence=urgency,
     )

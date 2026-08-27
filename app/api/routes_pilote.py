@@ -223,7 +223,9 @@ def declarer_course(code: str, payload: CourseExistanteRequest) -> CoursierRespo
 
     order = _construire_order(payload, "EXIST")
     fleet_manager.add_order(order)
-    fleet_manager.assign_order_to_coursier(order, coursier.code)
+    fleet_manager.assign_order_to_coursier(
+        order, coursier.code, ramassage_effectue=payload.ramassage_effectue
+    )
     return _coursier_to_response(fleet_manager.get_coursier(coursier.code))
 
 

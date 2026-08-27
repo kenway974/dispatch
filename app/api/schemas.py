@@ -190,6 +190,10 @@ class CourseExistanteRequest(BaseModel):
     delivery_lon: float = Field(..., ge=-180, le=180)
     zone: Zone
     volume_type: VolumeType = Field(default=VolumeType.STANDARD)
+    ramassage_effectue: bool = Field(
+        default=False,
+        description="Le colis est déjà dans la sacoche — l'itinéraire ne repasse plus par le ramassage",
+    )
 
 
 class PingPositionRequest(BaseModel):
