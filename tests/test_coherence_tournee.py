@@ -274,3 +274,47 @@ class TestProtectionDesUrgences:
         fleet.add_coursier(c)
         detail = score_detail(c, course(NATION, VILLEJUIF, zone=Zone.PETITE_COURONNE), fleet)
         assert detail.penalite_retard == 0.0
+
+
+class TestDepartageDesTresBonsCandidats:
+    """
+    Le score était plafonné à un minimum de 0,01. Deux coursiers dont la course
+    raccourcit la tournée s'y retrouvaient tous les deux, à égalité, alors que
+    l'un portait trois fois plus que l'autre.
+
+    Le classement devenait arbitraire au moment où il aurait dû être le plus fin.
+    Un score négatif est une information — la course fait gagner du chemin — et
+    doit rester ordonnable.
+    """
+
+    def _coursier(self, code: str, charge: int) -> Coursier:
+        return Coursier(
+            code=code, vehicle_type=VehicleType.SCOOT_50, position=BERTHIER,
+            assigned_orders=[
+                AssignedOrder(
+                    order_id=f"{code}{i}",
+                    pickup_lat=BERTHIER.lat, pickup_lon=BERTHIER.lon,
+                    delivery_lat=BASTILLE.lat, delivery_lon=BASTILLE.lon,
+                    volume_type=VolumeType.STANDARD, ramassage_effectue=True,
+                )
+                for i in range(charge)
+            ],
+        )
+
+    def _course_qui_raccourcit(self) -> Order:
+        return course(BERTHIER, BASTILLE)
+
+    def test_la_charge_departage_deux_detours_negatifs(self) -> None:
+        leger = self._coursier("LEG", charge=1)
+        lourd = self._coursier("LRD", charge=3)
+        assert score_coursier(leger, self._course_qui_raccourcit()) < \
+               score_coursier(lourd, self._course_qui_raccourcit())
+
+    def test_un_score_negatif_reste_possible(self) -> None:
+        """La course fait gagner du chemin : le dire est une information utile."""
+        assert score_coursier(self._coursier("LEG", charge=1), self._course_qui_raccourcit()) < 0
+
+    def test_l_ordre_suit_toujours_la_charge(self) -> None:
+        scores = [score_coursier(self._coursier(f"C{n}", n), self._course_qui_raccourcit())
+                  for n in (1, 2, 3, 4)]
+        assert scores == sorted(scores)

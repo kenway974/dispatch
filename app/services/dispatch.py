@@ -469,7 +469,8 @@ def score_coursier(coursier: Coursier, order: Order, fleet: "FleetManager | None
         order   : Commande à attribuer.
 
     Returns:
-        Score numérique ≥ 0.01. Plus bas = plus prioritaire.
+        Score en kilomètres équivalents. Plus bas = plus prioritaire.
+        **Peut être négatif** : la course raccourcit alors sa tournée.
     """
     return score_detail(coursier, order, fleet).total
 
@@ -584,8 +585,13 @@ def score_detail(coursier: Coursier, order: Order, fleet: "FleetManager | None" 
     # nombre de kilomètres que celui que le dispatcheur lit dans le classement.
     validation, motif_validation = avis_de_validation(coursier, detour)
 
-    total = max(0.01, detour + load_penalty + vehicle_penalty + retard_penalty
-                      + penalite_cumul + debordement)
+    # Pas de plancher. Un score négatif signifie que la course fait GAGNER du
+    # chemin au coursier, et c'est une information — l'écraser à 0,01 mettait à
+    # égalité deux excellents candidats que la charge séparait pourtant
+    # nettement, et rendait le classement arbitraire là où il devait être le
+    # plus fin.
+    total = (detour + load_penalty + vehicle_penalty + retard_penalty
+             + penalite_cumul + debordement)
 
     return ScoreDetail(
         total=total,
