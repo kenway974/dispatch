@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="theme-color" content="#1B4332"/>
+  <title>Suivi — {{ code }}</title>
+  <style>
+    /* Page conçue pour un téléphone posé sur un guidon : gros caractères,
+       fort contraste, aucune interaction requise une fois lancée. */
+    :root { --deep:#1B4332; --mid:#2D6A4F; --soft:#52B788; --pale:#D8F3DC; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    body { margin:0; font-family:system-ui,-apple-system,sans-serif; background:var(--deep);
+           color:white; min-height:100vh; display:flex; flex-direction:column;
+           align-items:center; justify-content:center; padding:24px; text-align:center; }
+    .code { font-size:4rem; font-weight:800; letter-spacing:.06em; line-height:1; }
+    .vehicule { color:var(--soft); font-size:.95rem; font-weight:600; margin-top:6px; }
+    .pastille { width:110px; height:110px; border-radius:50%; margin:28px auto 18px;
+                display:flex; align-items:center; justify-content:center; font-size:2.8rem;
+                background:rgba(255,255,255,.1); border:3px solid rgba(255,255,255,.25); transition:.3s; }
+    .pastille.actif { background:var(--soft); border-color:white; animation:pulse 2.2s infinite; }
+    .pastille.erreur { background:#DC2626; border-color:#FCA5A5; }
+    @keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.06);opacity:.85} }
+    .etat { font-size:1.15rem; font-weight:700; }
+    .detail { color:#B7E4C7; font-size:.85rem; margin-top:8px; line-height:1.5; max-width:320px; }
+    .charge { margin-top:26px; background:rgba(255,255,255,.1); border-radius:14px;
+              padding:14px 22px; font-size:.9rem; }
+    .charge b { font-size:1.5rem; display:block; }
+    button { margin-top:28px; background:white; color:var(--deep); border:none; border-radius:999px;
+             padding:16px 36px; font-size:1.05rem; font-weight:800; cursor:pointer; }
+    button:disabled { opacity:.45; }
+    .note { margin-top:22px; color:#95D5B2; font-size:.74rem; max-width:320px; line-height:1.5; }
+  </style>
+</head>
+<body>
+
+  <div class="code">{{ code }}</div>
+  {% if vehicule %}<div class="vehicule">{{ vehicule.replace('_', ' ') }}</div>{% endif %}
+
+  <div class="pastille" id="pastille">📍</div>
+  <div class="etat" id="etat">Suivi à l'arrêt</div>
+  <div class="detail" id="detail">
+    {% if connu %}
+      Appuyez pour partager votre position avec le dispatch.
+    {% else %}
+      Ce code n'est pas encore enregistré dans la flotte. Prévenez le dispatch.
+    {% endif %}
+  </div>
+
+  <div class="charge" id="charge" style="display:none">
+    Courses en cours <b id="charge-valeur">—</b>
+  </div>
+
+  <button id="bouton" {% if not connu %}disabled{% endif %}>Démarrer le suivi</button>
+
+  <p class="note">
+    Gardez cette page ouverte pendant votre service. Elle envoie votre position
+    toutes les 30 secondes et rien d'autre — ni micro, ni photos, ni historique
+    en dehors de vos heures. Fermez-la pour tout arrêter.
+  </p>
+
+<script>
+const CODE = {{ code | tojson }};
+const INTERVALLE_MS = 30000;
+
+let veille = null, minuteur = null, actif = false, dernierEnvoi = null;
+
+const pastille = document.getElementById('pastille');
+const etat     = document.getElementById('etat');
+const detail   = document.getElementById('detail');
+const bouton   = document.getElementById('bouton');
+const charge   = document.getElementById('charge');
+
+function afficher(classe, icone, titre, texte) {
+  pastille.className = 'pastille ' + classe;
+  pastille.textContent = icone;
+  etat.textContent = titre;
+  detail.textContent = texte;
+}
+
+async function envoyer(position) {
+  try {
+    const r = await fetch(`/coursiers/${CODE}/ping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+        precision_m: position.coords.accuracy
+      })
+    });
+    if (!r.ok) {
+      const erreur = await r.json().catch(() => ({}));
+      throw new Error(erreur.detail || 'Envoi refusé');
+    }
+    const data = await r.json();
+    dernierEnvoi = new Date();
+
+    charge.style.display = 'block';
+    document.getElementById('charge-valeur').textContent = data.courses + ' · ' + data.charge;
+    afficher('actif', '🛰️', 'Suivi actif',
+      `Position transmise à ${dernierEnvoi.toLocaleTimeString('fr-FR')} · précision ${Math.round(position.coords.accuracy)} m`);
+  } catch (err) {
+    // Un tunnel ou un trou de réseau ne doit pas arrêter le suivi :
+    // la position suivante repartira toute seule.
+    afficher('actif', '📡', 'Reconnexion…', err.message + ' — nouvelle tentative dans 30 s');
+  }
+}
+
+function relever() {
+  if (!actif) return;
+  navigator.geolocation.getCurrentPosition(
+    envoyer,
+    err => afficher('erreur', '⚠️', 'Position indisponible',
+      err.code === 1
+        ? "Autorisation refusée. Activez la localisation pour ce site dans les réglages du navigateur."
+        : "Signal GPS momentanément perdu — nouvelle tentative dans 30 s."),
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+  );
+}
+
+function demarrer() {
+  if (!navigator.geolocation) {
+    afficher('erreur', '⚠️', 'Non pris en charge', "Ce navigateur ne sait pas partager la position.");
+    return;
+  }
+  actif = true;
+  bouton.textContent = 'Arrêter le suivi';
+  afficher('actif', '⏳', 'Recherche du signal…', 'Autorisez la localisation si votre téléphone la demande.');
+  relever();
+  minuteur = setInterval(relever, INTERVALLE_MS);
+
+  // Empêche la mise en veille de l'écran là où l'API est disponible ;
+  // ailleurs, le suivi reprend simplement au réveil.
+  if ('wakeLock' in navigator) {
+    navigator.wakeLock.request('screen').then(v => veille = v).catch(() => {});
+  }
+}
+
+function arreter() {
+  actif = false;
+  clearInterval(minuteur);
+  if (veille) { veille.release().catch(() => {}); veille = null; }
+  bouton.textContent = 'Démarrer le suivi';
+  charge.style.display = 'none';
+  afficher('', '📍', 'Suivi à l\'arrêt', 'Le dispatch ne reçoit plus votre position.');
+}
+
+bouton.addEventListener('click', () => actif ? arreter() : demarrer());
+
+// Au retour d'arrière-plan, on relève immédiatement : le minuteur a pu être gelé.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && actif) relever();
+});
+</script>
+</body>
+</html>

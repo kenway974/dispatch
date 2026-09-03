@@ -4,10 +4,11 @@ Modèles de données pour les coursiers.
 
 from __future__ import annotations
 
-from typing import List
+from datetime import datetime
+from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.enums import VehicleType, VolumeType
+from app.models.enums import PositionSource, VehicleType, VolumeType
 from app.config import VOLUME_WEIGHTS, MAX_LOAD_BY_VEHICLE
 
 
@@ -32,6 +33,15 @@ class AssignedOrder(BaseModel):
     delivery_lon: float
     volume_type: VolumeType
 
+    ramassage_effectue: bool = Field(
+        default=False,
+        description=(
+            "Le colis est déjà dans la sacoche. L'itinéraire ne repasse alors plus "
+            "par le point de ramassage — sinon le moteur croit le coursier obligé de "
+            "retraverser Paris pour un colis qu'il a déjà sur lui."
+        ),
+    )
+
     @property
     def weight(self) -> int:
         """Poids en unités de charge de cette commande."""
@@ -53,7 +63,9 @@ class Coursier(BaseModel):
     Attributs clés :
     - code           : identifiant unique 2-4 lettres (ex: KEN, JC)
     - vehicle_type   : détermine les zones et volumes éligibles
-    - position       : position GPS actualisée en temps réel
+    - position       : DERNIÈRE position connue — jamais une estimation.
+                       Les estimations sont recalculées à la lecture, pour ne pas
+                       accumuler l'erreur d'estimation dans l'état stocké.
     - assigned_orders: liste des courses actuellement assignées
     - is_active      : False si le coursier est hors service / déconnecté
     """
@@ -64,6 +76,52 @@ class Coursier(BaseModel):
     position: GpsPosition
     assigned_orders: List[AssignedOrder] = Field(default_factory=list)
     is_active: bool = Field(default=True, description="Coursier disponible et connecté")
+
+    position_updated_at: datetime = Field(
+        default_factory=datetime.now,
+        description="Horodatage de la dernière position connue — sert à mesurer sa fraîcheur",
+    )
+    position_source: PositionSource = Field(
+        default=PositionSource.MANUELLE,
+        description="D'où vient cette position : saisie du dispatcheur ou GPS du coursier",
+    )
+
+    autonomie_etendue: bool = Field(
+        default=False,
+        description=(
+            "Il emporte des batteries de rechange et accepte la Grande Couronne. "
+            "C'est une caractéristique du coursier, pas de sa machine : deux 125 "
+            "identiques n'ont pas le même rayon selon qui les conduit."
+        ),
+    )
+
+    debut_pause: Optional[datetime] = Field(
+        default=None,
+        description="Heure à laquelle il s'arrête pour manger. None = non renseignée.",
+    )
+    retour_depot: Optional[GpsPosition] = Field(
+        default=None,
+        description=(
+            "Où il rentre en fin de service. Renseigné, ce retour devient le "
+            "dernier point de sa tournée : une course sur le chemin ne lui coûte "
+            "presque rien, une course à l'opposé le fait dévier pour rien."
+        ),
+    )
+    fin_service: Optional[datetime] = Field(
+        default=None,
+        description="Heure à laquelle il rend son scooter. None = non renseignée.",
+    )
+
+    @property
+    def prochain_arret(self) -> Optional[datetime]:
+        """
+        Le premier des deux qui arrive : sa pause ou sa fin de service.
+
+        Une course qu'il ne peut pas terminer avant cet instant n'a rien à faire
+        chez lui — elle finirait au bureau ou pas du tout.
+        """
+        moments = [m for m in (self.debut_pause, self.fin_service) if m is not None]
+        return min(moments) if moments else None
 
     @field_validator("code")
     @classmethod

@@ -92,19 +92,19 @@ async def geocode_address(address: str) -> tuple[float, float]:
 # Templates CSV
 # ---------------------------------------------------------------------------
 FLEET_TEMPLATE_CSV = (
-    "code,vehicle_type,adresse\n"
-    "KEN,scoot_banlieue_proche,\"Le Marais, Paris\"\n"
-    "MEH,scoot_banlieue_proche,\"Place du Tertre, Montmartre, Paris\"\n"
-    "LIM,scoot_banlieue_proche,\"Place du 18 Juin 1940, Montparnasse, Paris\"\n"
-    "MIC,scoot_banlieue_proche,\"Batignolles, Paris\"\n"
-    "MAT,scoot_banlieue_proche,\"Place de la Nation, Paris\"\n"
-    "JC,scoot_banlieue_loin,\"Place du 8 mai 1945, Saint-Denis\"\n"
-    "MEF,scoot_banlieue_loin,\"Place Salvador Allende, Créteil\"\n"
-    "ABD,scoot_banlieue_loin,\"Place de la République, Bondy\"\n"
-    "JEA,longue_distance,\"Aéroport d'Orly, Paray-Vieille-Poste\"\n"
-    "SET,longue_distance,\"Aéroport Charles de Gaulle, Roissy\"\n"
-    "LAH,fourgon,\"Place d'Armes, Versailles\"\n"
-    "CAR,fourgon,\"Mairie de Vitry-sur-Seine\"\n"
+    "code,vehicle_type,adresse,autonomie_etendue\n"
+    "KEN,scoot_50,\"Le Marais, Paris\",non\n"
+    "MEH,scoot_50,\"Place du Tertre, Montmartre, Paris\",non\n"
+    "LIM,scoot_50,\"Place du 18 Juin 1940, Montparnasse, Paris\",non\n"
+    "MIC,scoot_125,\"Batignolles, Paris\",non\n"
+    "MAT,scoot_125,\"Place de la Nation, Paris\",non\n"
+    "JC,scoot_125,\"Place du 8 mai 1945, Saint-Denis\",oui\n"
+    "MEF,scoot_125,\"Place Salvador Allende, Créteil\",non\n"
+    "ABD,scoot_125,\"Place de la République, Bondy\",oui\n"
+    "JEA,voiture,\"Aéroport d'Orly, Paray-Vieille-Poste\",non\n"
+    "SET,voiture,\"Aéroport Charles de Gaulle, Roissy\",non\n"
+    "LAH,fourgon,\"Place d'Armes, Versailles\",non\n"
+    "CAR,fourgon,\"Mairie de Vitry-sur-Seine\",non\n"
 )
 
 # Modèle commandes : adresses + client_tier + deadline_minutes
@@ -204,8 +204,8 @@ async def upload_fleet(file: UploadFile = File(...)) -> dict:
         lon_raw = row.get("lon", "").strip()
 
         try:
-            if not code or len(code) != 3:
-                raise ValueError(f"Code invalide : '{code}' (doit faire 3 lettres)")
+            if not code or not (2 <= len(code) <= 4):
+                raise ValueError(f"Code invalide : '{code}' (doit faire 2 à 4 caractères)")
             vehicle_type = VehicleType(vehicle_type_raw)
 
             # Résolution des coordonnées : adresse prioritaire sur lat/lon
@@ -226,6 +226,8 @@ async def upload_fleet(file: UploadFile = File(...)) -> dict:
                 code=code,
                 vehicle_type=vehicle_type,
                 position=GpsPosition(lat=lat, lon=lon),
+                autonomie_etendue=row.get("autonomie_etendue", "").strip().lower()
+                in ("oui", "yes", "1", "true", "vrai"),
             )
             fleet_manager.add_coursier(coursier)
             added.append({"code": code, "vehicle_type": str(vehicle_type), "lat": lat, "lon": lon})

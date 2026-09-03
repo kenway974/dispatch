@@ -14,10 +14,11 @@ Chaque commande entrante est analysée et attribuée instantanément au meilleur
 5. [Installation](#5-installation)
 6. [Démarrage](#6-démarrage)
 7. [API REST — Référence complète](#7-api-rest--référence-complète)
-8. [Tests](#8-tests)
-9. [Configuration](#9-configuration)
-10. [Peupler la flotte de démo](#10-peupler-la-flotte-de-démo)
-11. [Étendre le projet](#11-étendre-le-projet)
+8. [Mode pilote — essai en conditions réelles](#8-mode-pilote--essai-en-conditions-réelles)
+9. [Tests](#9-tests)
+10. [Configuration](#10-configuration)
+11. [Peupler la flotte de démo](#11-peupler-la-flotte-de-démo)
+12. [Étendre le projet](#12-étendre-le-projet)
 
 ---
 
@@ -60,28 +61,37 @@ Commande reçue
 ```
 dispatch/
 ├── app/
-│   ├── main.py                  # Point d'entrée FastAPI
+│   ├── main.py                  # Point d'entrée FastAPI + restauration de l'état
 │   ├── config.py                # Constantes et seuils configurables
 │   │
 │   ├── models/                  # Modèles de données (Pydantic)
-│   │   ├── enums.py             # VehicleType, Zone, VolumeType, OrderStatus
-│   │   ├── courier.py           # Courier, GpsPosition, AssignedOrder
+│   │   ├── enums.py             # VehicleType, Zone, VolumeType, ClientTier, OrderStatus
+│   │   ├── coursier.py          # Coursier, GpsPosition, AssignedOrder
 │   │   └── order.py             # Order, Coordinates
 │   │
 │   ├── services/                # Logique métier pure (sans HTTP)
 │   │   ├── geo.py               # Calculs géographiques (Haversine, waypoints)
 │   │   ├── fleet.py             # Gestionnaire d'état de la flotte (store)
-│   │   └── dispatch.py          # Moteur de scoring et d'attribution
+│   │   ├── dispatch.py          # Moteur de scoring et d'attribution
+│   │   ├── comparaison.py       # Mode pilote : classement expliqué et verdict
+│   │   └── storage.py           # Persistance SQLite (journal + instantané flotte)
+│   │
+│   ├── templates/
+│   │   ├── index.html           # Démo prospect
+│   │   └── pilote.html          # Interface de pilotage (essai d'un mois)
 │   │
 │   └── api/                     # Couche HTTP
 │       ├── schemas.py           # Schémas request / response
-│       └── routes.py            # Endpoints FastAPI
+│       ├── routes.py            # Endpoints REST
+│       ├── routes_ui.py         # Démo : page, imports CSV/Excel, géocodage
+│       └── routes_pilote.py     # Mode pilote : comparaison, journal, export
 │
 ├── tests/
-│   └── test_dispatch.py         # Suite de tests pytest (14 cas)
+│   ├── test_dispatch.py         # Moteur de dispatch (25 cas)
+│   └── test_pilote.py           # Mode pilote et persistance (35 cas)
 │
 ├── scripts/
-│   └── seed_fleet.py            # Peuple la flotte avec 8 coursiers de démo
+│   └── seed_fleet.py            # Peuple la flotte avec les coursiers de démo
 │
 └── requirements.txt
 ```
@@ -106,9 +116,9 @@ Chaque coursier possède un véhicule adapté à une zone précise. **Un scooter
 
 | Type de véhicule | Zone autorisée | Peut porter |
 |---|---|---|
-| `scoot_ville` | Paris intra-muros uniquement | Standard, Volume |
-| `scoot_banlieue_proche` | Petite Couronne uniquement | Standard, Volume |
-| `scoot_banlieue_loin` | Grande Couronne uniquement | Standard, Volume |
+| `scoot_50` | Paris intra-muros uniquement | Standard, Volume |
+| `scoot_50` | Petite Couronne uniquement | Standard, Volume |
+| `scoot_125` | Grande Couronne uniquement | Standard, Volume |
 | `fourgon` | Grande Couronne + **Voiture toutes zones** | Standard, Volume, Voiture |
 
 > **Règle fourgon** : Un colis de type `Voiture` (très volumineux) ne peut être transporté que par un fourgon, et ce **quelle que soit la zone**. Si un client parisien commande un colis Voiture, le fourgon de Grande Couronne peut se déplacer pour le prendre.
@@ -255,14 +265,14 @@ curl http://localhost:8000/health
 
 ---
 
-### `POST /couriers` — Enregistrer un coursier
+### `POST /coursiers` — Enregistrer un coursier
 
 ```bash
-curl -X POST http://localhost:8000/couriers \
+curl -X POST http://localhost:8000/coursiers \
   -H "Content-Type: application/json" \
   -d '{
     "code": "KEN",
-    "vehicle_type": "scoot_ville",
+    "vehicle_type": "scoot_50",
     "lat": 48.8566,
     "lon": 2.3522
   }'
@@ -271,7 +281,7 @@ curl -X POST http://localhost:8000/couriers \
 ```json
 {
   "code": "KEN",
-  "vehicle_type": "scoot_ville",
+  "vehicle_type": "scoot_50",
   "lat": 48.8566,
   "lon": 2.3522,
   "is_active": true,
@@ -283,7 +293,7 @@ curl -X POST http://localhost:8000/couriers \
 }
 ```
 
-**Valeurs acceptées pour `vehicle_type` :** `scoot_ville` · `scoot_banlieue_proche` · `scoot_banlieue_loin` · `fourgon`
+**Valeurs acceptées pour `vehicle_type` :** `scoot_50` · `scoot_50` · `scoot_125` · `fourgon`
 
 ---
 
@@ -341,42 +351,42 @@ curl -X POST http://localhost:8000/orders \
 
 ---
 
-### `PUT /couriers/{code}/position` — Mettre à jour la position GPS
+### `PUT /coursiers/{code}/position` — Mettre à jour la position GPS
 
 Appelé en continu par l'application mobile du coursier.
 
 ```bash
-curl -X PUT http://localhost:8000/couriers/KEN/position \
+curl -X PUT http://localhost:8000/coursiers/KEN/position \
   -H "Content-Type: application/json" \
   -d '{"lat": 48.8620, "lon": 2.3480}'
 ```
 
 ---
 
-### `PUT /couriers/{code}/active?active=false` — Désactiver un coursier
+### `PUT /coursiers/{code}/active?active=false` — Désactiver un coursier
 
 ```bash
 # Fin de service / pause
-curl -X PUT "http://localhost:8000/couriers/KEN/active?active=false"
+curl -X PUT "http://localhost:8000/coursiers/KEN/active?active=false"
 
 # Retour en service
-curl -X PUT "http://localhost:8000/couriers/KEN/active?active=true"
+curl -X PUT "http://localhost:8000/coursiers/KEN/active?active=true"
 ```
 
 ---
 
-### `GET /couriers` — Liste de la flotte complète
+### `GET /coursiers` — Liste de la flotte complète
 
 ```bash
-curl http://localhost:8000/couriers
+curl http://localhost:8000/coursiers
 ```
 
 ---
 
-### `GET /couriers/{code}` — Détail d'un coursier
+### `GET /coursiers/{code}` — Détail d'un coursier
 
 ```bash
-curl http://localhost:8000/couriers/KEN
+curl http://localhost:8000/coursiers/KEN
 ```
 
 ---
@@ -397,7 +407,172 @@ curl http://localhost:8000/orders/ORD-001
 
 ---
 
-## 8. Tests
+## 8. Mode pilote — essai en conditions réelles
+
+Interface : **`http://localhost:8000/pilote`**
+
+Le mode pilote sert à répondre à une seule question, avec des chiffres :
+*est-ce que ce moteur décide comme notre dispatcheur ?*
+
+### Le protocole
+
+Le dispatcheur travaille normalement. Pour chaque course, il saisit le coursier
+qu'il **vient d'attribuer**, puis l'application révèle ce qu'elle aurait décidé.
+
+L'ordre compte. Révéler d'abord la réponse du moteur biaiserait le choix humain
+et l'essai ne vaudrait plus rien — c'est pourquoi l'interface exige le choix
+manuel avant d'afficher quoi que ce soit.
+
+### Deux règles structurantes
+
+**1. C'est le choix humain qui est appliqué à la flotte, jamais celui du moteur.**
+Le dispatcheur reste maître de son exploitation ; l'application se contente
+d'observer. Sans cette règle, l'état simulé divergerait du terrain dès le premier
+désaccord, et toutes les comparaisons suivantes seraient faussées.
+
+**2. Chaque comparaison est journalisée avec le classement complet.**
+Un désaccord de la deuxième semaine reste analysable à la fin du mois : on sait
+qui était éligible, à quel score, et pourquoi les autres ont été écartés.
+
+### Déroulé d'une journée
+
+| Étape | Action |
+|-------|--------|
+| Début de service | Renseigner la position de chaque coursier et **les courses qu'il porte déjà** (`＋` sur sa fiche) |
+| Nouvelle course | Saisir ramassage / livraison, volume, client, délai |
+| Attribution | Choisir le coursier retenu, puis **Comparer et journaliser** |
+| Livraison | Cliquer `✕` sur la course pour libérer la charge |
+| Fin de mois | **Export CSV** — le livrable de l'essai |
+
+Sans les courses déjà en portefeuille, le moteur croit tout le monde disponible
+et son équilibrage de charge ne veut plus rien dire. C'est la saisie à ne pas sauter.
+
+### Où sont les coursiers ?
+
+Le moteur note les coursiers sur leur distance au point de ramassage. Cette note
+ne vaut donc rien de plus que la position sur laquelle elle est calculée — et
+personne ne ressaisira huit positions à la main entre deux courses.
+
+Trois sources, par ordre de préférence :
+
+| Source | Mise en œuvre | Fraîcheur |
+|--------|---------------|-----------|
+| **Import** depuis le système de suivi déjà en place | `POST /positions/import` alimenté par `scripts/sync_positions.py` | temps réel |
+| **Estimation à l'estime** | aucune — actif par défaut | recalculée en continu |
+| **Clic sur la carte** | le dispatcheur reporte ce qu'il voit dans l'application de la société | instantanée, manuelle |
+
+**L'import est la voie normale.** L'entreprise dispose déjà d'une application sur
+laquelle les coursiers ouvrent leur shift et qui donne leur position en direct.
+Le moteur n'a pas à refaire ce travail, il a besoin d'y accéder :
+`POST /positions/import` est la prise unique par laquelle ces positions entrent,
+quelle que soit leur provenance. Voir `scripts/sync_positions.py` — tout est
+écrit sauf la fonction qui interroge le système source, à compléter une fois son
+API connue.
+
+**L'estimation prend le relais** dès qu'aucune position récente n'est disponible :
+dernier point connu, temps écoulé, vitesse moyenne du véhicule, suite du trajet
+déjà assigné. C'est le raisonnement que le dispatcheur fait de tête ; il est ici
+simplement écrit. Aucune intégration nécessaire — l'essai peut démarrer sans que
+personne n'ouvre l'accès à quoi que ce soit.
+
+Deux garanties, sans lesquelles ces chiffres ne vaudraient rien :
+
+1. **Une estimation n'est jamais écrite dans l'état.** La position stockée reste
+   le dernier point réellement connu ; l'estimation est recalculée à chaque
+   lecture. Sinon l'erreur s'accumulerait — une estimation d'estimation
+   d'estimation — et au bout d'une heure le moteur raisonnerait sur une fiction.
+
+2. **La fraîcheur est affichée, toujours.** « GPS il y a 20 s » et « estimée
+   depuis sa livraison d'il y a 35 min » ne se valent pas : la seconde mérite un
+   coup de téléphone avant de suivre la recommandation. Chaque coursier porte son
+   badge, et la carte le colore en conséquence (vert temps réel, orange estimé,
+   rouge périmé au-delà de 20 minutes).
+
+Vitesses moyennes et seuils de péremption sont dans `app/config.py` — ce sont des
+ordres de grandeur urbains à ajuster après les premiers jours d'essai.
+
+```bash
+# Activer l'import (fermé par défaut : sans jeton configuré, l'endpoint refuse)
+DISPATCH_IMPORT_TOKEN=<jeton partagé avec le script de synchronisation>
+```
+
+Une page `/suivi/{code}` existe aussi : le coursier l'ouvre sur son téléphone et
+elle envoie sa position toutes les 30 secondes, sans rien installer. Elle fait
+doublon avec l'application de la société et n'est là qu'en secours, si aucun
+accès technique à cette dernière n'est obtenu.
+
+### Les indicateurs
+
+| Indicateur | Ce qu'il dit |
+|------------|--------------|
+| **Taux d'accord** | Part des courses où le moteur et le dispatcheur ont choisi le même coursier |
+| **Top 3** | Part des cas où le choix humain figurait dans les trois premiers du moteur — un désaccord sur le 2e n'a pas le poids d'un écart total |
+| **Écart moyen** | Coût moyen d'un désaccord, en km équivalents |
+| **Répartition par coursier** | Qui reçoit plus (ou moins) selon le moteur. Un écart systématique sur un coursier vaut souvent un réglage, pas un rejet |
+
+Un taux d'accord de 100 % signifierait que le moteur n'apporte rien. L'intérêt
+est dans les désaccords : chacun est soit une erreur du moteur à corriger, soit
+une optimisation que l'humain n'avait pas vue.
+
+### Endpoints
+
+| Méthode | Route | Rôle |
+|---------|-------|------|
+| `POST` | `/pilote/comparaison` | Journalise la décision et révèle celle du moteur |
+| `POST` | `/pilote/simulation` | Simulation à blanc — rien n'est journalisé ni attribué |
+| `GET` | `/pilote/journal` | Journal + statistiques cumulées |
+| `DELETE` | `/pilote/journal/{id}` | Supprime une saisie erronée |
+| `GET` | `/pilote/journal/export.csv` | Export CSV de l'essai |
+| `POST` | `/coursiers/{code}/courses` | Déclare une course déjà en portefeuille |
+| `DELETE` | `/coursiers/{code}/courses/{id}` | Course livrée — libère la charge |
+| `POST` | `/positions/import` | Reprise des positions du système de l'entreprise (jeton requis) |
+| `GET` | `/pilote/positions` | Positions exploitables et leur fraîcheur |
+| `POST` | `/coursiers/{code}/ping` | Position remontée par un téléphone (secours) |
+
+Exemple :
+
+```bash
+curl -X POST http://localhost:8000/pilote/comparaison \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pickup_lat": 48.8566, "pickup_lon": 2.3522,
+    "delivery_lat": 48.8864, "delivery_lon": 2.3432,
+    "zone": "Paris", "volume_type": "Standard",
+    "choix_manuel": "MEH",
+    "commentaire": "il rentrait au dépôt"
+  }'
+```
+
+```json
+{
+  "choix_manuel": "MEH",
+  "choix_app": "KEN",
+  "accord": false,
+  "rang_manuel": 2,
+  "ecart_km": 2.18,
+  "verdict": "Désaccord : l'application aurait pris KEN. MEH arrive 2e de son classement, à 2.2 km équivalents.",
+  "classement": [ "..." ],
+  "statistiques": { "total": 12, "taux_accord": 75.0 }
+}
+```
+
+### Persistance
+
+L'essai dure un mois : le journal ne doit pas disparaître à un redéploiement.
+Tout est stocké en SQLite (bibliothèque standard, aucune dépendance ajoutée) —
+le journal des comparaisons **et** un instantané de la flotte, réécrit à chaque
+mutation et rechargé au démarrage.
+
+```bash
+DISPATCH_DB_PATH=/data/pilote.db   # défaut : data/pilote.db
+```
+
+Sur Railway, monter un volume et pointer `DISPATCH_DB_PATH` dessus : sans volume,
+le système de fichiers est éphémère et le mois d'essai part au premier redéploiement.
+
+---
+
+## 9. Tests
 
 ```bash
 pytest tests/ -v
@@ -410,8 +585,8 @@ tests/test_dispatch.py::TestGeo::test_haversine_same_point          PASSED
 tests/test_dispatch.py::TestGeo::test_haversine_paris_montmartre     PASSED
 tests/test_dispatch.py::TestGeo::test_haversine_symmetry             PASSED
 tests/test_dispatch.py::TestGeo::test_min_distance_to_route_nearby   PASSED
-tests/test_dispatch.py::TestEligibility::test_scoot_ville_eligible_for_paris              PASSED
-tests/test_dispatch.py::TestEligibility::test_scoot_ville_not_eligible_for_petite_couronne PASSED
+tests/test_dispatch.py::TestEligibility::test_scoot_50_eligible_for_paris              PASSED
+tests/test_dispatch.py::TestEligibility::test_scoot_50_not_eligible_for_petite_couronne PASSED
 tests/test_dispatch.py::TestEligibility::test_fourgon_eligible_for_voiture_any_zone       PASSED
 tests/test_dispatch.py::TestEligibility::test_courier_at_capacity_not_eligible            PASSED
 tests/test_dispatch.py::TestEligibility::test_volume_colis_fits_remaining_capacity        PASSED
@@ -440,7 +615,7 @@ tests/test_dispatch.py::TestDispatch::test_dispatch_multiple_orders_sequential  
 
 ---
 
-## 9. Configuration
+## 10. Configuration
 
 Tous les seuils métier sont centralisés dans `app/config.py`. Aucune modification de code logique n'est nécessaire pour ajuster le comportement.
 
@@ -456,9 +631,9 @@ VOLUME_WEIGHTS = {
 
 # Capacité max par type de véhicule
 MAX_LOAD_BY_VEHICLE = {
-    VehicleType.SCOOT_VILLE:            5,
-    VehicleType.SCOOT_BANLIEUE_PROCHE:  5,
-    VehicleType.SCOOT_BANLIEUE_LOIN:    5,
+    VehicleType.SCOOT_50:            5,
+    VehicleType.SCOOT_50:  5,
+    VehicleType.SCOOT_125:    5,
     VehicleType.FOURGON:               10,
 }
 
@@ -474,7 +649,7 @@ LOAD_PENALTY_PER_UNIT = 0.4
 
 ---
 
-## 10. Peupler la flotte de démo
+## 11. Peupler la flotte de démo
 
 Le script `scripts/seed_fleet.py` enregistre 8 coursiers positionnés sur des adresses réelles de Paris et banlieue :
 
@@ -486,12 +661,12 @@ python scripts/seed_fleet.py
 Connexion à http://localhost:8000...
 API en ligne. Flotte actuelle : 0 coursier(s).
 
-  ✓ KEN (scoot_ville)             — Paris centre (Île de la Cité)
-  ✓ THO (scoot_ville)             — Montmartre
-  ✓ ALI (scoot_ville)             — Bastille
-  ✓ MAR (scoot_banlieue_proche)   — Saint-Denis
-  ✓ LEA (scoot_banlieue_proche)   — Aubervilliers
-  ✓ SAM (scoot_banlieue_loin)     — Sarcelles
+  ✓ KEN (scoot_50)             — Paris centre (Île de la Cité)
+  ✓ THO (scoot_50)             — Montmartre
+  ✓ ALI (scoot_50)             — Bastille
+  ✓ MAR (scoot_50)   — Saint-Denis
+  ✓ LEA (scoot_50)   — Aubervilliers
+  ✓ SAM (scoot_125)     — Sarcelles
   ✓ FOU (fourgon)                 — Versailles
   ✓ MAX (fourgon)                 — Créteil
 
@@ -500,7 +675,7 @@ Flotte prête : 8 coursiers actifs.
 
 ---
 
-## 11. Étendre le projet
+## 12. Étendre le projet
 
 ### Remplacer le store in-memory par une base de données
 

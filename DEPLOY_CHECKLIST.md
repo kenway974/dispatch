@@ -27,11 +27,29 @@
 | Variable | Obligatoire | Valeur |
 |---|---|---|
 | `PORT` | ❌ Non | Injecté automatiquement par Railway — **ne pas définir** |
+| `DISPATCH_DB_PATH` | ⚠️ Pour l'essai | `/data/pilote.db` — chemin de la base SQLite du mode pilote |
+| `DISPATCH_IMPORT_TOKEN` | Si import des positions | Jeton partagé protégeant `POST /positions/import`. Non défini = import refusé |
 
-**Aucune variable d'environnement applicative n'est requise** pour le déploiement initial.  
-Le projet utilise uniquement des constantes Python dans `app/config.py`.
+Les règles de dispatch elles-mêmes restent des constantes Python dans `app/config.py`.
 
-Si vous ajoutez une base de données ou une API externe, ajoutez les variables dans Railway UI **et** dans `.env.example`.
+---
+
+## 💾 Volume persistant — **indispensable pour l'essai d'un mois**
+
+Le système de fichiers de Railway est **éphémère** : à chaque redéploiement, il repart
+de zéro. Sans volume, le journal des comparaisons et la flotte disparaissent — un mois
+d'essai perdu au premier `git push`.
+
+1. **Settings → Volumes → New Volume**
+2. Mount path : `/data`
+3. **Settings → Variables** → ajouter `DISPATCH_DB_PATH=/data/pilote.db`
+4. Redéployer
+
+Vérification après déploiement : ajouter un coursier, redéployer, puis recharger
+`/pilote`. Le coursier doit toujours être là.
+
+Sauvegarde recommandée pendant l'essai : télécharger régulièrement
+`https://<projet>.up.railway.app/pilote/journal/export.csv`.
 
 ---
 
@@ -53,7 +71,10 @@ git push origin main
 ### 3. Vérifier le déploiement
 - Onglet **Deployments** → logs en temps réel
 - Chercher : `Application startup complete` dans les logs Uvicorn
-- Tester l'URL publique générée : `https://<projet>.up.railway.app/docs`
+- Tester l'URL publique générée :
+  - `https://<projet>.up.railway.app/docs` — l'API
+  - `https://<projet>.up.railway.app/` — la démo prospect
+  - `https://<projet>.up.railway.app/pilote` — le mode pilote (l'essai)
 
 ### 4. (Optionnel) Domaine custom
 - **Settings → Domains** → ajouter votre domaine
@@ -66,10 +87,10 @@ git push origin main
 ```
 dispatch/
 ├── app/
-│   ├── api/          # Routes REST + UI
+│   ├── api/          # Routes REST + UI + mode pilote
 │   ├── models/       # Modèles Pydantic + enums
-│   ├── services/     # Logique dispatch, fleet, geo
-│   ├── templates/    # Jinja2 (index.html)
+│   ├── services/     # dispatch, fleet, geo, comparaison, storage
+│   ├── templates/    # Jinja2 (index.html, pilote.html)
 │   ├── config.py     # Constantes métier
 │   └── main.py       # Point d'entrée FastAPI
 ├── tests/

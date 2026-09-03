@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mode pilote — Dispatch manuel vs automatique</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    :root { --green-deep:#1B4332; --green-mid:#2D6A4F; --green-soft:#52B788; --green-pale:#D8F3DC;
+            --amber:#B45309; --amber-pale:#FEF3C7; --blue:#1D4ED8; --blue-pale:#DBEAFE; }
+    body { font-family:system-ui,-apple-system,sans-serif; background:#F4F7F5; }
+    .card { background:white; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+    #map { height:340px; border-radius:12px; }
+    input:focus, select:focus, textarea:focus { outline:2px solid var(--green-soft); outline-offset:1px; }
+    .fld { width:100%; border:1px solid #E5E7EB; border-radius:8px; padding:8px 10px; font-size:.875rem; background:white; }
+    .lbl { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#6B7280; margin-bottom:3px; display:block; }
+    .btn { border:none; border-radius:9px; font-weight:700; cursor:pointer; transition:.15s; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .btn-main { background:var(--green-deep); color:white; padding:12px 20px; font-size:.95rem; }
+    .btn-main:hover:not(:disabled) { background:var(--green-mid); }
+    .btn-ghost { background:#E5E7EB; color:#374151; padding:8px 14px; font-size:.8rem; }
+    .btn-ghost:hover:not(:disabled) { background:#D1D5DB; }
+    .tab { padding:9px 20px; border-radius:999px; font-size:.85rem; font-weight:700; border:none; cursor:pointer; }
+    .tab.on { background:var(--green-deep); color:white; }
+    .tab:not(.on) { background:#E5E7EB; color:#6B7280; }
+    .stat-val { font-size:1.9rem; font-weight:800; line-height:1; }
+    .chip { display:inline-block; padding:2px 8px; border-radius:999px; font-size:.68rem; font-weight:700; }
+    .chip-veh { background:#EEF2FF; color:#3730A3; }
+    .chip-off { background:#F3F4F6; color:#6B7280; }
+    .bar { height:6px; border-radius:99px; background:#E5E7EB; overflow:hidden; }
+    .bar > div { height:100%; background:var(--green-soft); transition:width .3s; }
+    .bar.full > div { background:#EF4444; }
+    .reveal-accord   { border:2px solid var(--green-soft); background:var(--green-pale); }
+    .reveal-desaccord{ border:2px solid #FCD34D; background:var(--amber-pale); }
+    .pick-box { border-radius:12px; padding:14px 16px; flex:1; min-width:150px; }
+    .pick-you { background:var(--blue-pale); border:1px solid #93C5FD; }
+    .pick-app { background:white; border:1px solid #A7F3D0; }
+    .rank-row { border-bottom:1px solid #F3F4F6; }
+    .rank-row.is-app    { background:#ECFDF5; }
+    .rank-row.is-manuel { box-shadow:inset 3px 0 0 var(--blue); }
+    .rank-row.is-both   { background:#ECFDF5; box-shadow:inset 3px 0 0 var(--blue); }
+    .modal-bg { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; }
+    .modal-bg.on { display:flex; }
+    .modal { background:white; border-radius:16px; width:100%; max-width:480px; margin:1rem; max-height:90vh; overflow-y:auto; }
+    .spin { width:15px; height:15px; border:2px solid #D1D5DB; border-top-color:var(--green-soft); border-radius:50%; animation:sp .6s linear infinite; display:none; }
+    @keyframes sp { to{transform:rotate(360deg)} }
+    #toast { transition:opacity .3s; }
+    .fade-in { animation:fi .25s ease; }
+    /* Redéfini localement : masquer un onglet ne doit pas dépendre du chargement du CDN Tailwind */
+    .hidden { display:none !important; }
+    .palier { border:1.5px solid #E5E7EB; background:white; border-radius:999px; padding:4px 13px;
+              font-size:.78rem; font-weight:700; color:#6B7280; cursor:pointer; transition:.15s; }
+    .palier:hover { border-color:var(--green-soft); }
+    .palier.on { background:var(--green-deep); border-color:var(--green-deep); color:white; }
+    .frais { font-size:.62rem; font-weight:700; margin-top:4px; display:flex; align-items:center; gap:4px; }
+    .frais-direct  { color:#166534; }
+    .frais-estime  { color:#B45309; }
+    .frais-perime  { color:#B91C1C; }
+    .point { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+    .point-direct { background:#16A34A; animation:pulse 2s infinite; }
+    .point-estime { background:#F59E0B; }
+    .point-perime { background:#DC2626; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    #map.repositionnement { cursor:crosshair; }
+    @keyframes fi { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:none} }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════ HEADER ═══════════════════ -->
+<header style="background:var(--green-deep)" class="text-white px-5 py-3 shadow-lg">
+  <div class="max-w-[1500px] mx-auto flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">🧭</span>
+      <div>
+        <h1 class="font-bold leading-tight">Mode pilote</h1>
+        <p class="text-xs text-green-200">Votre dispatch, comparé à celui du moteur — en conditions réelles</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/" class="text-xs text-green-200 hover:text-white underline">Démo</a>
+      <a href="/docs" class="text-xs text-green-200 hover:text-white underline">API</a>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════════ BANDEAU STATS ═══════════════════ -->
+<div class="bg-white border-b">
+  <div class="max-w-[1500px] mx-auto px-5 py-3 flex flex-wrap items-center gap-6">
+    <div>
+      <div class="stat-val" style="color:var(--green-deep)" id="s-taux">—</div>
+      <div class="text-[.7rem] font-bold uppercase tracking-wide text-gray-500">Taux d'accord</div>
+    </div>
+    <div>
+      <div class="stat-val text-gray-700" id="s-total">0</div>
+      <div class="text-[.7rem] font-bold uppercase tracking-wide text-gray-500">Comparaisons</div>
+    </div>
+    <div>
+      <div class="stat-val text-gray-700" id="s-top3">—</div>
+      <div class="text-[.7rem] font-bold uppercase tracking-wide text-gray-500">Votre choix dans le top 3</div>
+    </div>
+    <div>
+      <div class="stat-val text-gray-700" id="s-ecart">—</div>
+      <div class="text-[.7rem] font-bold uppercase tracking-wide text-gray-500">Écart moyen (km éq.)</div>
+    </div>
+    <div class="ml-auto flex gap-2">
+      <button class="tab on" id="tab-b-pilotage" onclick="ongler('pilotage')">Pilotage</button>
+      <button class="tab"    id="tab-b-journal"  onclick="ongler('journal')">Journal</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ TOAST ═══════════════════ -->
+<div id="toast" class="fixed top-4 right-4 z-[70] px-4 py-2.5 rounded-lg text-white text-sm font-semibold shadow-lg opacity-0 pointer-events-none"></div>
+
+<main class="max-w-[1500px] mx-auto px-5 py-5">
+
+<!-- ═══════════════════ ONGLET PILOTAGE ═══════════════════ -->
+<section id="tab-pilotage">
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+    <!-- ─────── FLOTTE ─────── -->
+    <div class="lg:col-span-4">
+      <div class="card p-4">
+        <div class="flex items-center justify-between mb-1">
+          <h2 class="font-bold text-gray-800">Ma flotte</h2>
+          <button class="btn btn-ghost" onclick="ouvrirModalCoursier()">+ Coursier</button>
+        </div>
+        <p class="text-xs text-gray-500 mb-3">
+          Positions et courses en cours au moment du dispatch. Le moteur ne peut équilibrer
+          la charge que s'il voit ce que chacun porte déjà.
+        </p>
+        <div id="liste-flotte" class="space-y-2 max-h-[560px] overflow-y-auto pr-1"></div>
+      </div>
+    </div>
+
+    <!-- ─────── NOUVELLE COURSE + RÉVÉLATION ─────── -->
+    <div class="lg:col-span-8 space-y-5">
+
+      <div class="card p-4">
+        <h2 class="font-bold text-gray-800 mb-1">Nouvelle course</h2>
+        <p class="text-xs text-gray-500 mb-3">
+          Renseignez la course, indiquez le coursier que <strong>vous</strong> venez d'attribuer,
+          puis comparez. La réponse du moteur n'apparaît qu'après votre choix — c'est ce qui
+          rend l'essai honnête.
+        </p>
+
+        <form id="form-course" onsubmit="lancerComparaison(event, true)" class="space-y-3">
+          <div class="grid md:grid-cols-2 gap-3">
+            <div>
+              <label class="lbl">Adresse de ramassage</label>
+              <div class="flex gap-2 items-center">
+                <input class="fld" id="f-pickup-addr" placeholder="12 rue de Rivoli, Paris" onchange="geocoderChamp('pickup')">
+                <div class="spin" id="spin-pickup"></div>
+              </div>
+              <p class="text-[.68rem] text-gray-400 mt-1" id="hint-pickup">Validez le champ pour géolocaliser</p>
+            </div>
+            <div>
+              <label class="lbl">Adresse de livraison</label>
+              <div class="flex gap-2 items-center">
+                <input class="fld" id="f-delivery-addr" placeholder="Place du Tertre, Paris" onchange="geocoderChamp('delivery')">
+                <div class="spin" id="spin-delivery"></div>
+              </div>
+              <p class="text-[.68rem] text-gray-400 mt-1" id="hint-delivery">La zone est déduite du code postal</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label class="lbl">Zone</label>
+              <select class="fld" id="f-zone">
+                <option value="Paris">Paris</option>
+                <option value="Petite_Couronne">Petite Couronne</option>
+                <option value="Grande_Couronne">Grande Couronne</option>
+              </select>
+            </div>
+            <div>
+              <label class="lbl">Volume</label>
+              <select class="fld" id="f-volume">
+                <option value="Standard">Standard</option>
+                <option value="Volume">Volume</option>
+                <option value="Voiture">Voiture</option>
+              </select>
+            </div>
+            <div>
+              <label class="lbl">Client</label>
+              <select class="fld" id="f-tier">
+                <option value="standard">Standard</option>
+                <option value="premium">Premium</option>
+              </select>
+            </div>
+            <div>
+              <label class="lbl">Délai</label>
+              <input class="fld" id="f-deadline" type="number" min="1" placeholder="min">
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="lbl" style="margin:0 4px 0 0">Urgence</span>
+            {% for libelle, minutes in niveaux_urgence %}
+            <button type="button" class="palier" data-minutes="{{ minutes }}"
+                    onclick="choisirPalier(this, {{ minutes }})">{{ libelle }}</button>
+            {% endfor %}
+            <button type="button" class="palier" data-minutes="" onclick="choisirPalier(this, null)">Sans délai</button>
+          </div>
+
+          <div class="rounded-xl p-3" style="background:var(--blue-pale); border:1px solid #93C5FD">
+            <div class="grid md:grid-cols-2 gap-3 items-end">
+              <div>
+                <label class="lbl" style="color:var(--blue)">Votre choix — à qui l'avez-vous donnée ?</label>
+                <select class="fld" id="f-choix" required>
+                  <option value="">— Sélectionnez le coursier —</option>
+                </select>
+              </div>
+              <div>
+                <label class="lbl" style="color:var(--blue)">Pourquoi ? (facultatif)</label>
+                <input class="fld" id="f-commentaire" maxlength="500" placeholder="Il rentrait au dépôt, client habituel…">
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-2 items-center">
+            <button type="submit" class="btn btn-main" id="btn-comparer">Comparer et journaliser</button>
+            <button type="button" class="btn btn-ghost" onclick="lancerComparaison(event, false)">
+              Simuler sans journaliser
+            </button>
+            <span class="text-[.7rem] text-gray-400 ml-auto">
+              La course est attribuée à <em>votre</em> choix : la flotte suit le terrain.
+            </span>
+          </div>
+        </form>
+      </div>
+
+      <!-- Révélation -->
+      <div id="revelation" class="hidden"></div>
+
+      <div class="card p-4">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <h2 class="font-bold text-gray-800">Carte</h2>
+          <span class="text-[.7rem] text-gray-400">Positions rafraîchies automatiquement</span>
+        </div>
+        <div id="bandeau-carte" class="hidden mb-2 rounded-lg px-3 py-2 text-xs font-bold"
+             style="background:var(--blue-pale); border:1px solid #93C5FD; color:var(--blue)">
+          <span id="bandeau-texte"></span>
+          <button class="btn btn-ghost ml-2" style="padding:2px 10px" onclick="annulerRepositionnement()">Annuler</button>
+        </div>
+        <div id="map"></div>
+        <p class="text-[.7rem] text-gray-400 mt-2">
+          🟦 votre choix &nbsp;·&nbsp; 🟩 choix du moteur &nbsp;·&nbsp; ⬤ coursiers &nbsp;·&nbsp; 📦 ramassage / 🏁 livraison
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ ONGLET JOURNAL ═══════════════════ -->
+<section id="tab-journal" class="hidden space-y-5">
+  <div class="card p-4">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+      <div>
+        <h2 class="font-bold text-gray-800">Journal de l'essai</h2>
+        <p class="text-xs text-gray-500">Chaque décision, la vôtre et celle du moteur. C'est le livrable du mois.</p>
+      </div>
+      <div class="flex gap-2">
+        <a href="/pilote/journal/export.csv" class="btn btn-ghost inline-block" style="text-decoration:none">⬇ Export CSV</a>
+        <button class="btn btn-ghost" onclick="viderJournal()">Vider</button>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-[.68rem] uppercase tracking-wide text-gray-500 border-b">
+          <tr>
+            <th class="text-left py-2 px-2">Horodatage</th>
+            <th class="text-left py-2 px-2">Course</th>
+            <th class="text-left py-2 px-2">Zone / Volume</th>
+            <th class="text-left py-2 px-2">Vous</th>
+            <th class="text-left py-2 px-2">Moteur</th>
+            <th class="text-left py-2 px-2">Verdict</th>
+            <th class="text-right py-2 px-2">Rang</th>
+            <th class="text-right py-2 px-2">Écart</th>
+            <th class="text-left py-2 px-2">Note</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="corps-journal"></tbody>
+      </table>
+    </div>
+    <p id="journal-vide" class="text-center text-sm text-gray-400 py-8">
+      Aucune comparaison enregistrée pour l'instant.
+    </p>
+  </div>
+
+  <div class="card p-4">
+    <h2 class="font-bold text-gray-800 mb-1">Répartition par coursier</h2>
+    <p class="text-xs text-gray-500 mb-3">
+      Combien de courses chacun aurait reçues selon vous, et selon le moteur. Un écart
+      systématique sur un coursier vaut souvent un réglage, pas un rejet.
+    </p>
+    <div id="repartition" class="space-y-1.5"></div>
+  </div>
+</section>
+
+</main>
+
+<!-- ═══════════════════ MODAL COURSIER ═══════════════════ -->
+<div class="modal-bg" id="modal-coursier">
+  <div class="modal p-5">
+    <h3 class="font-bold text-gray-800 mb-3">Ajouter un coursier</h3>
+    <form onsubmit="creerCoursier(event)" class="space-y-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="lbl">Code (2 à 4 lettres)</label>
+          <input class="fld uppercase" id="m-code" required minlength="2" maxlength="4" placeholder="KEN">
+        </div>
+        <div>
+          <label class="lbl">Véhicule</label>
+          <select class="fld" id="m-vehicule">
+            <option value="scoot_50">Scoot ville</option>
+            <option value="scoot_50" selected>Scoot banlieue proche</option>
+            <option value="scoot_125">Scoot banlieue loin</option>
+            <option value="voiture">Longue distance</option>
+            <option value="fourgon">Fourgon</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="lbl">Position actuelle (adresse)</label>
+        <input class="fld" id="m-adresse" required value="{{ depot_adresse }}" placeholder="{{ depot_adresse }}">
+        <p class="text-[.68rem] text-gray-400 mt-1">Dépôt par défaut — remplacez par sa position réelle si vous la connaissez</p>
+      </div>
+      <div class="flex gap-2 justify-end pt-1">
+        <button type="button" class="btn btn-ghost" onclick="fermerModal('modal-coursier')">Annuler</button>
+        <button type="submit" class="btn btn-main" id="btn-creer-coursier">Ajouter</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════════════════ MODAL COURSE EN COURS ═══════════════════ -->
+<div class="modal-bg" id="modal-course">
+  <div class="modal p-5">
+    <h3 class="font-bold text-gray-800 mb-1">Course déjà en cours — <span id="mc-code"></span></h3>
+    <p class="text-xs text-gray-500 mb-3">
+      Aucun dispatch n'est déclenché : on enregistre simplement ce que ce coursier porte déjà.
+    </p>
+    <form onsubmit="creerCourseExistante(event)" class="space-y-3">
+      <div>
+        <label class="lbl">Adresse de ramassage</label>
+        <input class="fld" id="mc-pickup" required placeholder="Gare du Nord, Paris">
+      </div>
+      <div>
+        <label class="lbl">Adresse de livraison</label>
+        <input class="fld" id="mc-delivery" required placeholder="Mairie de Pantin">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="lbl">Zone</label>
+          <select class="fld" id="mc-zone">
+            <option value="Paris">Paris</option>
+            <option value="Petite_Couronne">Petite Couronne</option>
+            <option value="Grande_Couronne">Grande Couronne</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl">Volume</label>
+          <select class="fld" id="mc-volume">
+            <option value="Standard">Standard</option>
+            <option value="Volume">Volume</option>
+            <option value="Voiture">Voiture</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex gap-2 justify-end pt-1">
+        <button type="button" class="btn btn-ghost" onclick="fermerModal('modal-course')">Annuler</button>
+        <button type="submit" class="btn btn-main" id="btn-creer-course">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// État
+// ═══════════════════════════════════════════════════════════════
+let flotte = [];
+let coords = { pickup:null, delivery:null };   // {lat, lon} une fois géocodés
+let carte, coucheCoursiers = [], coucheCourse = [];
+let codeCourseModal = null;
+
+const LIBELLE_VEHICULE = {
+  scoot_50:'Scoot ville', scoot_50:'Scoot proche',
+  scoot_125:'Scoot loin', voiture:'Longue distance', fourgon:'Fourgon'
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  // La carte est un confort, pas une dépendance : si Leaflet ne charge pas
+  // (CDN bloqué par le réseau de l'entreprise), le pilotage doit rester utilisable.
+  initCarte();
+  chargerFlotte();
+  chargerJournal();
+
+  // Les positions estimées vieillissent en continu : sans ce rafraîchissement,
+  // le dispatcheur lirait « il y a 2 min » une heure après l'avoir ouvert.
+  setInterval(rafraichirPositions, 30000);
+});
+
+/** Rafraîchit les seules positions, sans recharger toute la flotte. */
+async function rafraichirPositions() {
+  if (document.hidden) return;      // onglet en arrière-plan : inutile de solliciter le serveur
+  try {
+    const r = await fetch('/pilote/positions');
+    const data = await r.json();
+    const parCode = Object.fromEntries(data.coursiers.map(c => [c.code, c]));
+    flotte.forEach(c => {
+      const maj = parCode[c.code];
+      if (maj) c.position = maj;
+    });
+    rendreFlotte();
+    redessinerCoursiers();
+  } catch (err) {
+    // Coupure réseau passagère : la prochaine passe rattrapera.
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Utilitaires
+// ═══════════════════════════════════════════════════════════════
+function toast(msg, type='success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = type === 'error' ? '#DC2626' : (type === 'info' ? '#1D4ED8' : '#16A34A');
+  t.style.opacity = '1';
+  setTimeout(() => t.style.opacity = '0', 3200);
+}
+
+function ongler(nom) {
+  document.getElementById('tab-pilotage').classList.toggle('hidden', nom !== 'pilotage');
+  document.getElementById('tab-journal').classList.toggle('hidden', nom !== 'journal');
+  document.getElementById('tab-b-pilotage').classList.toggle('on', nom === 'pilotage');
+  document.getElementById('tab-b-journal').classList.toggle('on', nom === 'journal');
+  if (nom === 'journal') chargerJournal();
+  if (nom === 'pilotage' && carte) setTimeout(() => carte.invalidateSize(), 60);
+}
+
+function ouvrirModal(id){ document.getElementById(id).classList.add('on'); }
+function fermerModal(id){ document.getElementById(id).classList.remove('on'); }
+function ouvrirModalCoursier(){ ouvrirModal('modal-coursier'); }
+
+function echapper(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/** Zone administrative déduite du code postal francilien. */
+function zoneDepuisCodePostal(cp) {
+  if (!cp) return null;
+  const dep = String(cp).slice(0, 2);
+  if (dep === '75') return 'Paris';
+  if (['92','93','94'].includes(dep)) return 'Petite_Couronne';
+  if (['77','78','91','95'].includes(dep)) return 'Grande_Couronne';
+  return null;
+}
+
+/** Géocodage Nominatim, avec le code postal pour en déduire la zone. */
+async function geocoder(adresse) {
+  const url = 'https://nominatim.openstreetmap.org/search'
+            + '?format=json&addressdetails=1&limit=1&countrycodes=fr&q=' + encodeURIComponent(adresse);
+  const r = await fetch(url, { headers: { 'Accept-Language': 'fr' } });
+  const data = await r.json();
+  if (!data.length) throw new Error('Adresse introuvable : ' + adresse);
+  return {
+    lat: parseFloat(data[0].lat),
+    lon: parseFloat(data[0].lon),
+    cp: (data[0].address || {}).postcode || null,
+    libelle: data[0].display_name
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Carte
+// ═══════════════════════════════════════════════════════════════
+function initCarte() {
+  try {
+    if (typeof L === 'undefined') throw new Error('Leaflet indisponible');
+    carte = L.map('map').setView([48.8566, 2.3522], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 18
+    }).addTo(carte);
+    carte.on('click', e => {
+      if (codeARepositionner) repositionner(e.latlng.lat, e.latlng.lng);
+    });
+  } catch (err) {
+    carte = null;
+    document.getElementById('map').innerHTML =
+      '<div class="h-full flex items-center justify-center text-sm text-gray-400 text-center px-6">'
+      + 'Carte indisponible (fond de carte inaccessible depuis ce réseau).<br>'
+      + 'Le pilotage et les comparaisons fonctionnent normalement.</div>';
+  }
+}
+
+function pastille(couleur, texte) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="background:${couleur};color:#fff;border-radius:50%;width:26px;height:26px;
+           display:flex;align-items:center;justify-content:center;font-size:.62rem;font-weight:800;
+           border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)">${texte}</div>`,
+    iconSize: [26, 26], iconAnchor: [13, 13]
+  });
+}
+
+/** Qualité de la position : c'est elle qui dit si la recommandation est fiable. */
+function qualite(position) {
+  if (!position) return 'perime';
+  if (position.perimee) return 'perime';
+  if (position.temps_reel) return 'direct';
+  return position.source === 'estimee' ? 'estime' : 'direct';
+}
+
+function badgeFraicheur(position) {
+  if (!position) return '';
+  const q = qualite(position);
+  return `<div class="frais frais-${q}">
+            <span class="point point-${q}"></span>
+            <span>${echapper(position.explication)}</span>
+          </div>`;
+}
+
+function redessinerCoursiers() {
+  if (!carte) return;
+  coucheCoursiers.forEach(m => carte.removeLayer(m));
+  coucheCoursiers = flotte.map(c => {
+    // La position affichée est la position EXPLOITABLE (GPS ou estimée),
+    // celle-là même sur laquelle le moteur calcule son score.
+    const pos = c.position || { lat: c.lat, lon: c.lon };
+    const q = qualite(c.position);
+    const couleur = !c.is_active ? '#9CA3AF'
+                  : c.remaining_capacity <= 0 ? '#EF4444'
+                  : q === 'perime' ? '#B91C1C'
+                  : q === 'estime' ? '#D97706' : '#2D6A4F';
+
+    return L.marker([pos.lat, pos.lon], { icon: pastille(couleur, c.code) })
+            .addTo(carte)
+            .bindTooltip(
+              `<b>${c.code}</b> — ${LIBELLE_VEHICULE[c.vehicle_type]}<br>`
+              + `${c.current_load}/${c.max_load} en charge · ${c.order_count} course(s)<br>`
+              + `<i>${c.position ? echapper(c.position.explication) : ''}</i>`,
+              { direction: 'top' }
+            );
+  });
+}
+
+function dessinerCourse(resultat) {
+  if (!carte) return;
+  coucheCourse.forEach(l => carte.removeLayer(l));
+  coucheCourse = [];
+  if (!coords.pickup || !coords.delivery) return;
+
+  coucheCourse.push(L.marker([coords.pickup.lat, coords.pickup.lon], { icon: pastille('#B45309', '📦') }).addTo(carte));
+  coucheCourse.push(L.marker([coords.delivery.lat, coords.delivery.lon], { icon: pastille('#7C3AED', '🏁') }).addTo(carte));
+  coucheCourse.push(L.polyline(
+    [[coords.pickup.lat, coords.pickup.lon], [coords.delivery.lat, coords.delivery.lon]],
+    { color: '#7C3AED', weight: 2, dashArray: '4,6', opacity: .7 }
+  ).addTo(carte));
+
+  // Trait depuis chaque décideur vers le point de ramassage
+  const tracer = (code, couleur, decalage) => {
+    const c = flotte.find(x => x.code === code);
+    if (!c) return;
+    coucheCourse.push(L.polyline(
+      [[c.lat, c.lon], [coords.pickup.lat, coords.pickup.lon]],
+      { color: couleur, weight: 4, opacity: .8, dashArray: decalage }
+    ).addTo(carte));
+  };
+  if (resultat.choix_manuel) tracer(resultat.choix_manuel, '#1D4ED8', '10,6');
+  if (resultat.choix_app)    tracer(resultat.choix_app,    '#16A34A', null);
+
+  const points = coucheCourse.filter(l => l.getLatLng).map(l => l.getLatLng());
+  if (points.length) carte.fitBounds(L.latLngBounds(points).pad(0.35));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Flotte
+// ═══════════════════════════════════════════════════════════════
+async function chargerFlotte() {
+  const r = await fetch('/coursiers');
+  flotte = await r.json();
+  rendreFlotte();
+  remplirSelectChoix();
+  redessinerCoursiers();
+}
+
+function rendreFlotte() {
+  const hote = document.getElementById('liste-flotte');
+  if (!flotte.length) {
+    hote.innerHTML = `<p class="text-sm text-gray-400 text-center py-8">
+      Aucun coursier. Commencez par en ajouter — ou importez votre flotte depuis
+      <a href="/" class="underline">la page de démo</a>.</p>`;
+    return;
+  }
+
+  hote.innerHTML = flotte.map(c => {
+    const pct = c.max_load ? Math.round(100 * c.current_load / c.max_load) : 0;
+    const sature = c.remaining_capacity <= 0;
+    const courses = c.assigned_orders.map(o => `
+      <div class="flex items-center justify-between text-[.7rem] text-gray-600 py-0.5">
+        <span class="truncate">${echapper(o.order_id)} <span class="text-gray-400">· ${echapper(o.volume_type)}</span></span>
+        <button class="text-red-500 hover:text-red-700 font-bold px-1"
+                title="Course livrée — libérer la charge"
+                onclick="cloturerCourse('${c.code}','${echapper(o.order_id)}')">✕</button>
+      </div>`).join('');
+
+    return `
+      <div class="border rounded-xl p-2.5 ${c.is_active ? '' : 'opacity-60'}">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="font-extrabold text-gray-800">${c.code}</span>
+            <span class="chip ${c.is_active ? 'chip-veh' : 'chip-off'}">${LIBELLE_VEHICULE[c.vehicle_type] || c.vehicle_type}</span>
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <button class="text-[.65rem] text-gray-500 hover:text-gray-800 px-1"
+                    title="Repositionner : cliquez ici puis sur la carte"
+                    onclick="demarrerRepositionnement('${c.code}')">📍</button>
+            <button class="text-[.65rem] text-gray-500 hover:text-gray-800 px-1" title="Déclarer une course en cours"
+                    onclick="ouvrirModalCourse('${c.code}')">＋</button>
+            <button class="text-[.65rem] text-gray-500 hover:text-gray-800 px-1"
+                    title="${c.is_active ? 'Mettre hors service' : 'Remettre en service'}"
+                    onclick="basculerActif('${c.code}', ${!c.is_active})">${c.is_active ? '⏸' : '▶'}</button>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 mt-1.5">
+          <div class="bar flex-1 ${sature ? 'full' : ''}"><div style="width:${pct}%"></div></div>
+          <span class="text-[.68rem] font-bold ${sature ? 'text-red-600' : 'text-gray-500'}">${c.current_load}/${c.max_load}</span>
+        </div>
+        ${badgeFraicheur(c.position)}
+        ${courses ? `<div class="mt-1.5 pt-1.5 border-t">${courses}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+function remplirSelectChoix() {
+  const sel = document.getElementById('f-choix');
+  const courant = sel.value;
+  sel.innerHTML = '<option value="">— Sélectionnez le coursier —</option>'
+    + flotte.filter(c => c.is_active)
+            .map(c => `<option value="${c.code}">${c.code} — ${LIBELLE_VEHICULE[c.vehicle_type]} (${c.current_load}/${c.max_load})</option>`)
+            .join('');
+  if (courant) sel.value = courant;
+}
+
+async function creerCoursier(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btn-creer-coursier');
+  btn.disabled = true;
+  try {
+    const pos = await geocoder(document.getElementById('m-adresse').value.trim());
+    const r = await fetch('/coursiers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: document.getElementById('m-code').value.trim().toUpperCase(),
+        vehicle_type: document.getElementById('m-vehicule').value,
+        lat: pos.lat, lon: pos.lon
+      })
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Erreur');
+    fermerModal('modal-coursier');
+    document.getElementById('m-code').value = '';
+    document.getElementById('m-adresse').value = '';
+    await chargerFlotte();
+    toast('Coursier ajouté');
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Repositionner par un clic sur la carte plutôt qu'en tapant une adresse :
+// le dispatcheur a la vraie position sous les yeux dans l'application de la
+// société ; il doit pouvoir la reporter ici en deux secondes, pas en trente.
+let codeARepositionner = null;
+
+function demarrerRepositionnement(code) {
+  if (!carte) {                     // sans carte, on retombe sur la saisie d'adresse
+    deplacerCoursierParAdresse(code);
+    return;
+  }
+  codeARepositionner = code;
+  document.getElementById('bandeau-texte').textContent =
+    `Cliquez sur la carte à l'endroit où se trouve ${code}`;
+  document.getElementById('bandeau-carte').classList.remove('hidden');
+  document.getElementById('map').classList.add('repositionnement');
+  document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function annulerRepositionnement() {
+  codeARepositionner = null;
+  document.getElementById('bandeau-carte').classList.add('hidden');
+  document.getElementById('map').classList.remove('repositionnement');
+}
+
+async function repositionner(lat, lon) {
+  const code = codeARepositionner;
+  annulerRepositionnement();
+  const r = await fetch(`/coursiers/${code}/position`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lat, lon })
+  });
+  if (!r.ok) { toast('Repositionnement refusé', 'error'); return; }
+  await chargerFlotte();
+  toast(`${code} repositionné`);
+}
+
+async function deplacerCoursierParAdresse(code) {
+  const adresse = prompt(`Nouvelle position de ${code} :`);
+  if (!adresse) return;
+  try {
+    const pos = await geocoder(adresse.trim());
+    const r = await fetch(`/coursiers/${code}/position`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat: pos.lat, lon: pos.lon })
+    });
+    if (!r.ok) throw new Error('Mise à jour refusée');
+    await chargerFlotte();
+    toast(`${code} déplacé`);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function basculerActif(code, actif) {
+  await fetch(`/coursiers/${code}/active?active=${actif}`, { method: 'PUT' });
+  await chargerFlotte();
+}
+
+function ouvrirModalCourse(code) {
+  codeCourseModal = code;
+  document.getElementById('mc-code').textContent = code;
+  ouvrirModal('modal-course');
+}
+
+async function creerCourseExistante(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btn-creer-course');
+  btn.disabled = true;
+  try {
+    const p = await geocoder(document.getElementById('mc-pickup').value.trim());
+    const d = await geocoder(document.getElementById('mc-delivery').value.trim());
+    const r = await fetch(`/coursiers/${codeCourseModal}/courses`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pickup_lat: p.lat, pickup_lon: p.lon,
+        delivery_lat: d.lat, delivery_lon: d.lon,
+        zone: document.getElementById('mc-zone').value,
+        volume_type: document.getElementById('mc-volume').value
+      })
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Erreur');
+    fermerModal('modal-course');
+    document.getElementById('mc-pickup').value = '';
+    document.getElementById('mc-delivery').value = '';
+    await chargerFlotte();
+    toast('Course enregistrée');
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function cloturerCourse(code, orderId) {
+  const r = await fetch(`/coursiers/${code}/courses/${encodeURIComponent(orderId)}`, { method: 'DELETE' });
+  if (!r.ok) { toast('Clôture impossible', 'error'); return; }
+  await chargerFlotte();
+  toast('Course clôturée — charge libérée');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Géocodage du formulaire de course
+// ═══════════════════════════════════════════════════════════════
+async function geocoderChamp(type) {
+  const champ = document.getElementById(`f-${type}-addr`);
+  const indice = document.getElementById(`hint-${type}`);
+  const spin  = document.getElementById(`spin-${type}`);
+  const adresse = champ.value.trim();
+  if (!adresse) { coords[type] = null; return; }
+
+  spin.style.display = 'block';
+  try {
+    const pos = await geocoder(adresse);
+    coords[type] = { lat: pos.lat, lon: pos.lon };
+    indice.textContent = `✓ ${pos.libelle.slice(0, 60)}`;
+    indice.className = 'text-[.68rem] text-green-700 mt-1';
+
+    // La zone se déduit du code postal de la LIVRAISON (c'est elle qui décide de l'éligibilité)
+    if (type === 'delivery') {
+      const zone = zoneDepuisCodePostal(pos.cp);
+      if (zone) {
+        document.getElementById('f-zone').value = zone;
+        indice.textContent += ` · zone ${zone.replace('_', ' ')}`;
+      }
+    }
+  } catch (err) {
+    coords[type] = null;
+    indice.textContent = '✗ ' + err.message;
+    indice.className = 'text-[.68rem] text-red-600 mt-1';
+  } finally {
+    spin.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Comparaison
+// ═══════════════════════════════════════════════════════════════
+/** Les paliers d'urgence remplissent le champ minutes — le moteur ne connaît que des minutes. */
+function choisirPalier(bouton, minutes) {
+  document.querySelectorAll('.palier').forEach(b => b.classList.remove('on'));
+  bouton.classList.add('on');
+  document.getElementById('f-deadline').value = minutes === null ? '' : minutes;
+}
+
+/** Une saisie manuelle de minutes désélectionne le palier : les deux ne doivent pas se contredire. */
+document.addEventListener('DOMContentLoaded', () => {
+  const champ = document.getElementById('f-deadline');
+  if (champ) champ.addEventListener('input', () => {
+    document.querySelectorAll('.palier').forEach(b => {
+      b.classList.toggle('on', b.dataset.minutes === champ.value);
+    });
+  });
+});
+
+async function lancerComparaison(e, journaliser) {
+  e.preventDefault();
+  if (!coords.pickup || !coords.delivery) {
+    toast('Renseignez les deux adresses (elles doivent être géolocalisées)', 'error');
+    return;
+  }
+  const choix = document.getElementById('f-choix').value;
+  if (journaliser && !choix) {
+    toast('Indiquez votre choix avant de comparer — c\'est ce qui rend l\'essai valable', 'error');
+    return;
+  }
+
+  const deadline = document.getElementById('f-deadline').value;
+  const corps = {
+    pickup_lat: coords.pickup.lat,   pickup_lon: coords.pickup.lon,
+    delivery_lat: coords.delivery.lat, delivery_lon: coords.delivery.lon,
+    zone: document.getElementById('f-zone').value,
+    volume_type: document.getElementById('f-volume').value,
+    client_tier: document.getElementById('f-tier').value,
+    deadline_minutes: deadline ? parseInt(deadline, 10) : null,
+    choix_manuel: choix || null,
+    commentaire: document.getElementById('f-commentaire').value.trim() || null
+  };
+
+  const btn = document.getElementById('btn-comparer');
+  btn.disabled = true;
+  try {
+    const r = await fetch(journaliser ? '/pilote/comparaison' : '/pilote/simulation', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(corps)
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Erreur de comparaison');
+
+    afficherRevelation(data, journaliser);
+    dessinerCourse(data);
+    if (journaliser) {
+      majStats(data.statistiques);
+      await chargerFlotte();     // la course a été attribuée à VOTRE choix
+      await chargerJournal();    // sinon l'onglet Journal reste sur l'état précédent
+      reinitialiserFormulaire();
+    }
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function reinitialiserFormulaire() {
+  ['f-pickup-addr','f-delivery-addr','f-deadline','f-commentaire'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('f-choix').value = '';
+  document.querySelectorAll('.palier').forEach(b => b.classList.remove('on'));
+  ['pickup','delivery'].forEach(t => {
+    const h = document.getElementById(`hint-${t}`);
+    h.className = 'text-[.68rem] text-gray-400 mt-1';
+    h.textContent = t === 'pickup' ? 'Validez le champ pour géolocaliser' : 'La zone est déduite du code postal';
+  });
+  coords = { pickup:null, delivery:null };
+}
+
+function afficherRevelation(d, journalise) {
+  const hote = document.getElementById('revelation');
+  const accord = d.accord;
+  const eligibles = d.classement.filter(c => c.eligible);
+  const ecartes   = d.classement.filter(c => !c.eligible);
+
+  const boite = (titre, code, couleurClasse, sousTitre) => {
+    if (!code) return `<div class="pick-box ${couleurClasse}">
+        <div class="text-[.68rem] font-bold uppercase tracking-wide text-gray-500">${titre}</div>
+        <div class="text-lg font-bold text-gray-400 mt-1">—</div>
+        <div class="text-[.7rem] text-gray-500">${sousTitre}</div></div>`;
+    const c = d.classement.find(x => x.code === code);
+    return `<div class="pick-box ${couleurClasse}">
+      <div class="text-[.68rem] font-bold uppercase tracking-wide text-gray-500">${titre}</div>
+      <div class="text-2xl font-extrabold text-gray-900 mt-0.5">${echapper(code)}</div>
+      <div class="text-[.7rem] text-gray-600">
+        ${c ? `${LIBELLE_VEHICULE[c.vehicle_type] || c.vehicle_type} · charge ${c.charge}/${c.capacite}` : ''}
+        ${c && c.score !== null ? ` · score ${c.score.toFixed(2)}` : ''}
+      </div></div>`;
+  };
+
+  const lignes = eligibles.map(c => {
+    const estApp    = c.code === d.choix_app;
+    const estManuel = c.code === d.choix_manuel;
+    const classe = estApp && estManuel ? 'is-both' : estApp ? 'is-app' : estManuel ? 'is-manuel' : '';
+    return `<tr class="rank-row ${classe}">
+      <td class="py-1.5 px-2 font-bold text-gray-500">${c.rang}</td>
+      <td class="py-1.5 px-2 font-extrabold text-gray-900">${echapper(c.code)}
+        ${estManuel ? '<span class="chip" style="background:var(--blue-pale);color:var(--blue)">vous</span>' : ''}
+        ${estApp ? '<span class="chip" style="background:#DCFCE7;color:#166534">moteur</span>' : ''}
+      </td>
+      <td class="py-1.5 px-2 text-gray-500 text-xs">${LIBELLE_VEHICULE[c.vehicle_type] || c.vehicle_type}</td>
+      <td class="py-1.5 px-2 text-right font-bold text-gray-800">${c.score.toFixed(2)}</td>
+      <td class="py-1.5 px-2 text-xs text-gray-500">${c.explications.map(echapper).join(' · ')}</td>
+    </tr>`;
+  }).join('');
+
+  const blocEcartes = ecartes.length ? `
+    <details class="mt-3">
+      <summary class="text-xs font-bold text-gray-500 cursor-pointer">
+        ${ecartes.length} coursier(s) écarté(s) — voir pourquoi
+      </summary>
+      <div class="mt-2 space-y-1">
+        ${ecartes.map(c => `<div class="text-xs text-gray-600 flex gap-2">
+            <span class="font-bold w-10">${echapper(c.code)}</span>
+            <span class="text-gray-500">${echapper(c.motif_inegibilite)}</span>
+          </div>`).join('')}
+      </div>
+    </details>` : '';
+
+  hote.className = 'card p-4 fade-in ' + (accord ? 'reveal-accord' : 'reveal-desaccord');
+  hote.innerHTML = `
+    <div class="flex items-start justify-between gap-3 mb-3">
+      <div>
+        <div class="text-2xl font-extrabold" style="color:${accord ? 'var(--green-deep)' : 'var(--amber)'}">
+          ${accord ? '✓ Accord' : (d.choix_manuel ? '✗ Désaccord' : 'Simulation')}
+        </div>
+        <p class="text-sm text-gray-700 mt-0.5">${echapper(d.verdict)}</p>
+      </div>
+      <span class="chip ${journalise ? '' : 'chip-off'}" style="${journalise ? 'background:#DCFCE7;color:#166534' : ''}">
+        ${journalise ? 'journalisé' : 'non journalisé'}
+      </span>
+    </div>
+
+    <div class="flex flex-wrap gap-3 mb-3">
+      ${boite('Votre choix', d.choix_manuel, 'pick-you', 'Aucun choix saisi')}
+      ${boite('Choix du moteur', d.choix_app, 'pick-app', 'Aucun coursier éligible')}
+    </div>
+
+    ${eligibles.length ? `
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-[.65rem] uppercase tracking-wide text-gray-400 border-b">
+          <tr><th class="text-left py-1 px-2">Rang</th><th class="text-left py-1 px-2">Coursier</th>
+              <th class="text-left py-1 px-2">Véhicule</th><th class="text-right py-1 px-2">Score</th>
+              <th class="text-left py-1 px-2">Décomposition</th></tr>
+        </thead>
+        <tbody>${lignes}</tbody>
+      </table>
+    </div>` : '<p class="text-sm text-gray-500">Aucun coursier éligible pour cette course.</p>'}
+    ${blocEcartes}
+    <p class="text-[.68rem] text-gray-400 mt-3">
+      Score en kilomètres équivalents — plus bas, meilleur. Il additionne la distance au ramassage,
+      une pénalité de charge, une pénalité si le véhicule n'est pas idéal, et retranche un bonus de groupage.
+    </p>`;
+  hote.classList.remove('hidden');
+  hote.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Journal
+// ═══════════════════════════════════════════════════════════════
+function majStats(s) {
+  if (!s) return;
+  document.getElementById('s-taux').textContent  = s.taux_accord === null ? '—' : s.taux_accord + ' %';
+  document.getElementById('s-total').textContent = s.total;
+  document.getElementById('s-top3').textContent  = s.taux_top3 === null ? '—' : s.taux_top3 + ' %';
+  document.getElementById('s-ecart').textContent = s.ecart_moyen_km === null ? '—' : s.ecart_moyen_km;
+}
+
+async function chargerJournal() {
+  const r = await fetch('/pilote/journal');
+  const data = await r.json();
+  majStats(data.statistiques);
+
+  const corps = document.getElementById('corps-journal');
+  const vide  = document.getElementById('journal-vide');
+  vide.classList.toggle('hidden', data.entrees.length > 0);
+
+  corps.innerHTML = data.entrees.map(e => `
+    <tr class="border-b hover:bg-gray-50">
+      <td class="py-1.5 px-2 text-xs text-gray-500">${echapper((e.horodatage || '').replace('T', ' '))}</td>
+      <td class="py-1.5 px-2 text-xs font-mono">${echapper(e.order_id)}</td>
+      <td class="py-1.5 px-2 text-xs text-gray-500">${echapper((e.zone || '').replace('_', ' '))} · ${echapper(e.volume_type)}</td>
+      <td class="py-1.5 px-2 font-bold" style="color:var(--blue)">${echapper(e.choix_manuel || '—')}</td>
+      <td class="py-1.5 px-2 font-bold" style="color:var(--green-mid)">${echapper(e.choix_app || '—')}</td>
+      <td class="py-1.5 px-2">
+        <span class="chip" style="${e.accord ? 'background:#DCFCE7;color:#166534' : 'background:var(--amber-pale);color:var(--amber)'}">
+          ${e.accord ? 'accord' : 'désaccord'}
+        </span>
+      </td>
+      <td class="py-1.5 px-2 text-right text-xs">${e.rang_manuel ?? '—'}</td>
+      <td class="py-1.5 px-2 text-right text-xs">${e.ecart_km === null ? '—' : (+e.ecart_km).toFixed(2)}</td>
+      <td class="py-1.5 px-2 text-xs text-gray-500 max-w-[180px] truncate" title="${echapper(e.commentaire || '')}">${echapper(e.commentaire || '')}</td>
+      <td class="py-1.5 px-2 text-right">
+        <button class="text-gray-300 hover:text-red-600 font-bold" title="Supprimer cette saisie"
+                onclick="supprimerEntree(${e.id})">✕</button>
+      </td>
+    </tr>`).join('');
+
+  const rep = document.getElementById('repartition');
+  const par = data.statistiques.par_coursier || [];
+  const maxi = Math.max(1, ...par.map(p => Math.max(p.manuel, p.app)));
+  rep.innerHTML = par.length ? par.map(p => `
+    <div class="flex items-center gap-2 text-xs">
+      <span class="font-extrabold w-12">${echapper(p.code)}</span>
+      <div class="flex-1 space-y-0.5">
+        <div class="flex items-center gap-2">
+          <div class="bar flex-1"><div style="width:${100 * p.manuel / maxi}%; background:var(--blue)"></div></div>
+          <span class="w-16 text-gray-500">vous ${p.manuel}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="bar flex-1"><div style="width:${100 * p.app / maxi}%"></div></div>
+          <span class="w-16 text-gray-500">moteur ${p.app}</span>
+        </div>
+      </div>
+    </div>`).join('') : '<p class="text-sm text-gray-400">Rien à afficher pour l\'instant.</p>';
+}
+
+async function supprimerEntree(id) {
+  if (!confirm('Supprimer cette comparaison du journal ?')) return;
+  const r = await fetch(`/pilote/journal/${id}`, { method: 'DELETE' });
+  if (!r.ok) { toast('Suppression impossible', 'error'); return; }
+  await chargerJournal();
+  toast('Entrée supprimée');
+}
+
+async function viderJournal() {
+  if (!confirm('Vider tout le journal ? Les statistiques de l\'essai seront perdues.')) return;
+  await fetch('/pilote/journal/reset', { method: 'POST' });
+  await chargerJournal();
+  toast('Journal vidé');
+}
+</script>
+</body>
+</html>

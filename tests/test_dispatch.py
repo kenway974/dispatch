@@ -19,7 +19,7 @@ from app.models.enums import OrderStatus, VehicleType, VolumeType, Zone
 from app.models.order import Coordinates, Order
 from app.services.dispatch import (
     dispatch_order,
-    get_eligible_couriers,
+    get_coursiers_eligibles,
     is_coursier_eligible,
     score_coursier,
 )
@@ -39,7 +39,7 @@ VERSAILLES   = GpsPosition(lat=48.8045, lon=2.1200)       # Grande Couronne oues
 CRETEIL      = GpsPosition(lat=48.7773, lon=2.4555)       # Grande Couronne sud-est
 
 
-def make_courier(
+def make_coursier(
     code: str,
     vehicle_type: VehicleType,
     position: GpsPosition,
@@ -112,8 +112,8 @@ class TestGeo:
 
     def test_min_distance_to_route_nearby(self) -> None:
         """Un coursier à Montmartre avec waypoints parisiens est proche de Bastille."""
-        coursier = make_courier(
-            "KEN", VehicleType.SCOOT_VILLE, MONTMARTRE,
+        coursier = make_coursier(
+            "KEN", VehicleType.SCOOT_50, MONTMARTRE,
             assigned=[make_assigned_order("O1", pickup=PARIS_CENTRE, delivery=BASTILLE)],
         )
         target = GpsPosition(lat=48.8540, lon=2.3700)  # très près de Bastille
@@ -127,58 +127,92 @@ class TestGeo:
 
 class TestEligibility:
 
-    def test_scoot_ville_eligible_for_paris(self) -> None:
-        coursier = make_courier("KEN", VehicleType.SCOOT_VILLE, PARIS_CENTRE)
+    def test_scoot_50_eligible_for_paris(self) -> None:
+        coursier = make_coursier("KEN", VehicleType.SCOOT_50, PARIS_CENTRE)
         order = make_order("O1", Zone.PARIS, VolumeType.STANDARD)
         assert is_coursier_eligible(coursier, order) is True
 
-    def test_scoot_ville_not_eligible_for_petite_couronne(self) -> None:
-        coursier = make_courier("KEN", VehicleType.SCOOT_VILLE, PARIS_CENTRE)
+    def test_scoot_50_eligible_pour_la_petite_couronne(self) -> None:
+        """Le 50 fait Boulogne, Clichy, Levallois, Montreuil — il y est admis."""
+        coursier = make_coursier("KEN", VehicleType.SCOOT_50, PARIS_CENTRE)
         order = make_order("O1", Zone.PETITE_COURONNE, VolumeType.STANDARD)
-        assert is_coursier_eligible(coursier, order) is False
+        assert is_coursier_eligible(coursier, order) is True
 
-    def test_scoot_banlieue_proche_not_eligible_for_paris(self) -> None:
-        coursier = make_courier("MAR", VehicleType.SCOOT_BANLIEUE_PROCHE, SAINT_DENIS)
+    def test_mais_on_lui_prefere_un_125(self) -> None:
+        """Admis ne veut pas dire préféré : le 125 passe devant à situation égale."""
+        cinquante = make_coursier("C50", VehicleType.SCOOT_50, PARIS_CENTRE)
+        centvingt = make_coursier("C12", VehicleType.SCOOT_125, PARIS_CENTRE)
+        order = make_order("O1", Zone.PETITE_COURONNE, VolumeType.STANDARD)
+        assert score_coursier(centvingt, order) < score_coursier(cinquante, order)
+
+    def test_aucun_scooter_ne_va_en_grande_couronne_sans_autonomie(self) -> None:
+        order = make_order("O1", Zone.GRANDE_COURONNE, VolumeType.STANDARD)
+        for vtype in (VehicleType.SCOOT_50, VehicleType.SCOOT_125):
+            assert is_coursier_eligible(make_coursier("SCO", vtype, PARIS_CENTRE), order) is False
+
+    def test_un_125_avec_batteries_de_rechange_y_va(self) -> None:
+        """Versailles, Cergy, Grigny : c'est le coursier qui décide, pas la machine."""
+        equipe = make_coursier("BAT", VehicleType.SCOOT_125, PARIS_CENTRE)
+        equipe.autonomie_etendue = True
+        order = make_order("O1", Zone.GRANDE_COURONNE, VolumeType.STANDARD)
+        assert is_coursier_eligible(equipe, order) is True
+
+    def test_un_50_meme_equipe_ne_suffit_pas(self) -> None:
+        """Des batteries ne transforment pas un 50 en machine de grande couronne."""
+        equipe = make_coursier("C50", VehicleType.SCOOT_50, PARIS_CENTRE)
+        equipe.autonomie_etendue = True
+        order = make_order("O1", Zone.GRANDE_COURONNE, VolumeType.STANDARD)
+        assert is_coursier_eligible(equipe, order) is False
+
+    def test_scoot_50_eligible_for_paris(self) -> None:
+        """Le scoot banlieue proche couvre Paris + Petite Couronne."""
+        coursier = make_coursier("MAR", VehicleType.SCOOT_50, SAINT_DENIS)
         order = make_order("O1", Zone.PARIS, VolumeType.STANDARD)
+        assert is_coursier_eligible(coursier, order) is True
+
+    def test_scoot_50_not_eligible_for_grande_couronne(self) -> None:
+        """En revanche, la Grande Couronne est hors de son périmètre."""
+        coursier = make_coursier("MAR", VehicleType.SCOOT_50, SAINT_DENIS)
+        order = make_order("O1", Zone.GRANDE_COURONNE, VolumeType.STANDARD)
         assert is_coursier_eligible(coursier, order) is False
 
     def test_fourgon_eligible_for_grande_couronne(self) -> None:
-        coursier = make_courier("FOU", VehicleType.FOURGON, VERSAILLES)
+        coursier = make_coursier("FOU", VehicleType.FOURGON, VERSAILLES)
         order = make_order("O1", Zone.GRANDE_COURONNE, VolumeType.STANDARD)
         assert is_coursier_eligible(coursier, order) is True
 
     def test_fourgon_eligible_for_voiture_any_zone(self) -> None:
         """Le fourgon peut prendre un colis Voiture même en zone Paris."""
-        coursier = make_courier("FOU", VehicleType.FOURGON, PARIS_CENTRE)
+        coursier = make_coursier("FOU", VehicleType.FOURGON, PARIS_CENTRE)
         order = make_order("O1", Zone.PARIS, VolumeType.VOITURE)
         assert is_coursier_eligible(coursier, order) is True
 
     def test_scoot_cannot_take_voiture(self) -> None:
         """Aucun scooter ne peut transporter un colis Voiture."""
-        for vtype in [VehicleType.SCOOT_VILLE, VehicleType.SCOOT_BANLIEUE_PROCHE, VehicleType.SCOOT_BANLIEUE_LOIN]:
-            coursier = make_courier("KEN", vtype, PARIS_CENTRE)
+        for vtype in [VehicleType.SCOOT_50, VehicleType.SCOOT_50, VehicleType.SCOOT_125]:
+            coursier = make_coursier("KEN", vtype, PARIS_CENTRE)
             order = make_order("O1", Zone.PARIS, VolumeType.VOITURE)
             assert is_coursier_eligible(coursier, order) is False, f"Scoot {vtype} ne devrait pas accepter Voiture"
 
-    def test_inactive_courier_not_eligible(self) -> None:
-        coursier = make_courier("KEN", VehicleType.SCOOT_VILLE, PARIS_CENTRE)
+    def test_inactive_coursier_not_eligible(self) -> None:
+        coursier = make_coursier("KEN", VehicleType.SCOOT_50, PARIS_CENTRE)
         coursier.is_active = False
         order = make_order("O1", Zone.PARIS, VolumeType.STANDARD)
         assert is_coursier_eligible(coursier, order) is False
 
-    def test_courier_at_capacity_not_eligible(self) -> None:
+    def test_coursier_at_capacity_not_eligible(self) -> None:
         """Un scoot plein (5/5 unités Standard) ne doit pas être éligible."""
         assigned = [make_assigned_order(f"O{i}", VolumeType.STANDARD) for i in range(5)]
-        coursier = make_courier("KEN", VehicleType.SCOOT_VILLE, PARIS_CENTRE, assigned=assigned)
+        coursier = make_coursier("KEN", VehicleType.SCOOT_50, PARIS_CENTRE, assigned=assigned)
         assert coursier.current_load == 5
         assert coursier.is_at_capacity is True
         order = make_order("ONEW", Zone.PARIS, VolumeType.STANDARD)
         assert is_coursier_eligible(coursier, order) is False
 
-    def test_courier_partial_load_still_eligible(self) -> None:
+    def test_coursier_partial_load_still_eligible(self) -> None:
         """Un scoot avec 3/5 unités peut encore prendre un Standard (1 unité)."""
         assigned = [make_assigned_order(f"O{i}", VolumeType.STANDARD) for i in range(3)]
-        coursier = make_courier("KEN", VehicleType.SCOOT_VILLE, PARIS_CENTRE, assigned=assigned)
+        coursier = make_coursier("KEN", VehicleType.SCOOT_50, PARIS_CENTRE, assigned=assigned)
         order = make_order("ONEW", Zone.PARIS, VolumeType.STANDARD)
         assert is_coursier_eligible(coursier, order) is True
 
@@ -189,7 +223,7 @@ class TestEligibility:
             make_assigned_order("O2", VolumeType.STANDARD),  # 1 unité
             make_assigned_order("O3", VolumeType.STANDARD),  # 1 unité → total 4
         ]
-        coursier = make_courier("KEN", VehicleType.SCOOT_VILLE, PARIS_CENTRE, assigned=assigned)
+        coursier = make_coursier("KEN", VehicleType.SCOOT_50, PARIS_CENTRE, assigned=assigned)
         assert coursier.current_load == 4
         order = make_order("ONEW", Zone.PARIS, VolumeType.VOLUME)  # besoin de 2 unités
         assert is_coursier_eligible(coursier, order) is False
@@ -201,31 +235,39 @@ class TestEligibility:
 
 class TestScoring:
 
-    def test_closer_courier_has_lower_score(self) -> None:
+    def test_closer_coursier_has_lower_score(self) -> None:
         """Le coursier plus proche du ramassage doit avoir un meilleur score."""
         order = make_order("O1", Zone.PARIS, VolumeType.STANDARD, pickup=PARIS_CENTRE)
 
-        near_courier = make_courier("NEA", VehicleType.SCOOT_VILLE, BASTILLE)    # ~1.6 km
-        far_courier  = make_courier("FAR", VehicleType.SCOOT_VILLE, MONTMARTRE)  # ~3.4 km
+        near_coursier = make_coursier("NEA", VehicleType.SCOOT_50, BASTILLE)    # ~1.6 km
+        far_coursier  = make_coursier("FAR", VehicleType.SCOOT_50, MONTMARTRE)  # ~3.4 km
 
-        score_near = score_coursier(near_courier, order)
-        score_far  = score_coursier(far_courier, order)
+        score_near = score_coursier(near_coursier, order)
+        score_far  = score_coursier(far_coursier, order)
 
         assert score_near < score_far, (
             f"Proche devrait scorer moins : {score_near:.2f} < {score_far:.2f}"
         )
 
-    def test_loaded_courier_penalized(self) -> None:
+    def test_loaded_coursier_penalized(self) -> None:
         """
         Deux coursiers à la même distance : celui avec plus de charge
         doit avoir un score plus élevé (moins prioritaire).
+
+        Les courses du coursier chargé sont volontairement placées à l'opposé de
+        la nouvelle : sinon le détour marginal les regrouperait et compenserait
+        la pénalité de charge — c'est le comportement voulu, mais ce n'est pas ce
+        que ce test mesure.
         """
         order = make_order("O1", Zone.PARIS, VolumeType.STANDARD, pickup=PARIS_CENTRE)
 
-        light = make_courier("LGT", VehicleType.SCOOT_VILLE, BASTILLE)
-        heavy = make_courier(
-            "HVY", VehicleType.SCOOT_VILLE, BASTILLE,
-            assigned=[make_assigned_order(f"O{i}") for i in range(3)],
+        light = make_coursier("LGT", VehicleType.SCOOT_50, BASTILLE)
+        heavy = make_coursier(
+            "HVY", VehicleType.SCOOT_50, BASTILLE,
+            assigned=[
+                make_assigned_order(f"O{i}", pickup=BASTILLE, delivery=BASTILLE)
+                for i in range(3)
+            ],
         )
 
         assert score_coursier(light, order) < score_coursier(heavy, order)
@@ -241,16 +283,16 @@ class TestScoring:
                            pickup=GpsPosition(lat=48.8530, lon=2.3690))
 
         # Coursier A : position à Paris centre, trajet passe PAR Bastille (groupage possible)
-        courier_with_groupage = make_courier(
-            "GRP", VehicleType.SCOOT_VILLE, PARIS_CENTRE,
+        coursier_with_groupage = make_coursier(
+            "GRP", VehicleType.SCOOT_50, PARIS_CENTRE,
             assigned=[make_assigned_order("OX", pickup=BASTILLE, delivery=MONTMARTRE)],
         )
 
         # Coursier B : même distance, sans courses
-        courier_no_groupage = make_courier("NGP", VehicleType.SCOOT_VILLE, PARIS_CENTRE)
+        coursier_no_groupage = make_coursier("NGP", VehicleType.SCOOT_50, PARIS_CENTRE)
 
-        score_grp = score_coursier(courier_with_groupage, order)
-        score_ngp = score_coursier(courier_no_groupage, order)
+        score_grp = score_coursier(coursier_with_groupage, order)
+        score_ngp = score_coursier(coursier_no_groupage, order)
 
         # Le coursier avec groupage passe près du ramassage → doit être favorisé
         assert score_grp < score_ngp
@@ -265,13 +307,13 @@ class TestDispatch:
     def _make_fleet(self) -> FleetManager:
         """Crée une flotte de test isolée (non partagée avec l'API)."""
         fleet = FleetManager()
-        fleet.add_courier(make_courier("KEN", VehicleType.SCOOT_VILLE, PARIS_CENTRE))
-        fleet.add_courier(make_courier("THO", VehicleType.SCOOT_VILLE, MONTMARTRE))
-        fleet.add_courier(make_courier("MAR", VehicleType.SCOOT_BANLIEUE_PROCHE, SAINT_DENIS))
-        fleet.add_courier(make_courier("FOU", VehicleType.FOURGON, VERSAILLES))
+        fleet.add_coursier(make_coursier("KEN", VehicleType.SCOOT_50, PARIS_CENTRE))
+        fleet.add_coursier(make_coursier("THO", VehicleType.SCOOT_50, MONTMARTRE))
+        fleet.add_coursier(make_coursier("MAR", VehicleType.SCOOT_50, SAINT_DENIS))
+        fleet.add_coursier(make_coursier("FOU", VehicleType.FOURGON, VERSAILLES))
         return fleet
 
-    def test_dispatch_assigns_nearest_courier(self) -> None:
+    def test_dispatch_assigns_nearest_coursier(self) -> None:
         """La commande Paris Standard doit aller au coursier Paris le plus proche."""
         fleet = self._make_fleet()
         # Ramassage à Bastille (~1.6 km de KEN, ~5 km de THO)
@@ -285,7 +327,7 @@ class TestDispatch:
         assert order.status == OrderStatus.ASSIGNED
 
     def test_dispatch_petite_couronne_goes_to_right_vehicle(self) -> None:
-        """Une commande Petite Couronne doit aller à scoot_banlieue_proche, pas scoot_ville."""
+        """Une commande Petite Couronne doit aller à scoot_50, pas scoot_50."""
         fleet = self._make_fleet()
         order = make_order("O2", Zone.PETITE_COURONNE, VolumeType.STANDARD, pickup=SAINT_DENIS)
         fleet.add_order(order)
@@ -306,7 +348,7 @@ class TestDispatch:
         assert result.success is True
         assert result.assigned_to == "FOU"
 
-    def test_dispatch_no_eligible_courier(self) -> None:
+    def test_dispatch_no_eligible_coursier(self) -> None:
         """Si aucun coursier éligible, le statut devient UNASSIGNABLE."""
         fleet = FleetManager()  # flotte vide
         order = make_order("O4", Zone.PARIS, VolumeType.STANDARD)
@@ -318,10 +360,10 @@ class TestDispatch:
         assert result.assigned_to is None
         assert order.status == OrderStatus.UNASSIGNABLE
 
-    def test_dispatch_updates_courier_load(self) -> None:
+    def test_dispatch_updates_coursier_load(self) -> None:
         """Après attribution, la charge du coursier doit être mise à jour."""
         fleet = self._make_fleet()
-        coursier = fleet.get_courier("KEN")
+        coursier = fleet.get_coursier("KEN")
         assert coursier is not None
         initial_load = coursier.current_load
 
@@ -334,18 +376,18 @@ class TestDispatch:
         expected_gain = VOLUME_WEIGHTS[VolumeType.STANDARD]
         assert new_load == initial_load + expected_gain
 
-    def test_dispatch_full_courier_skipped(self) -> None:
+    def test_dispatch_full_coursier_skipped(self) -> None:
         """Un coursier plein ne doit pas être choisi même s'il est le plus proche."""
         fleet = FleetManager()
         # Coursier plein (5/5 Standard)
-        full = make_courier(
-            "FUL", VehicleType.SCOOT_VILLE, PARIS_CENTRE,
+        full = make_coursier(
+            "FUL", VehicleType.SCOOT_50, PARIS_CENTRE,
             assigned=[make_assigned_order(f"O{i}") for i in range(5)],
         )
         # Coursier libre mais plus loin
-        free = make_courier("FRE", VehicleType.SCOOT_VILLE, MONTMARTRE)
-        fleet.add_courier(full)
-        fleet.add_courier(free)
+        free = make_coursier("FRE", VehicleType.SCOOT_50, MONTMARTRE)
+        fleet.add_coursier(full)
+        fleet.add_coursier(free)
 
         order = make_order("ONEW", Zone.PARIS, VolumeType.STANDARD, pickup=PARIS_CENTRE)
         fleet.add_order(order)
